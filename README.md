@@ -1,5 +1,5 @@
 """
-# SNCL - Sasha Nicolai's Library
+# SNCL - Sasha Nicolai's Library (Version 1.0.2, 2025-01-20)
 
 SNCL is a Python library designed to host several API integrations and utility functions. Currently, it provides support for Airtable API interactions, with plans to expand to other APIs in the future.
 

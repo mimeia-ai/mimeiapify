@@ -10,12 +10,14 @@ def read_long_description():
 
 setup(
     name='sncl',  # Your package name
-    version='1.0.1',  # Version of your package
+    version='1.0.2',  # Version of your package
     packages=find_packages(),  # Automatically find all packages in your project
     install_requires=[
         'requests',  # Add your dependencies here
         'pandas',
-        'typing'
+        'typing',
+        'aiohttp',
+        'asyncio'
     ],
     description="A utility library for Airtable API interactions",  # Short description
     long_description=read_long_description(),  # Use README.md as the long description

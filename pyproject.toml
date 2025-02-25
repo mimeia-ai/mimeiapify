@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sncl"
-version = "1.1.0"
+version = "1.2.0"
 authors = [
   { name = "Sasha Nicolai Canal", email = "sasha@candyflip.co" }
 ]
-description = "A utility library for different API interactions"
+description = "A utility library for API interactions including Wompi payments and Airtable"
 readme = "README.md"
 requires-python = ">=3.6"
 license = { file = "LICENSE" }

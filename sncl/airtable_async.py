@@ -26,16 +26,58 @@ class AirtableAsync:
             return schema
     """
 
-    def __init__(self, base_id: str, api_key: str):
+    def __init__(self, base_id: str, api_key: str, session: Optional[aiohttp.ClientSession] = None):
         """
         Initialize the AirtableAsync client.
 
         Args:
             base_id (str): The ID of the Airtable base.
             api_key (str): Your Airtable API key (Bearer token).
+            session (aiohttp.ClientSession, optional): An existing aiohttp session to use.
+                If None, a new session will be created when needed.
         """
         self.base_id = base_id
         self.api_key = api_key
+        self._session = session
+        self._own_session = False
+        
+        # Base API URLs
+        self.api_base_url = "https://api.airtable.com/v0"
+        self.meta_url = f"{self.api_base_url}/meta/bases/{self.base_id}"
+        self.record_url = f"{self.api_base_url}/{self.base_id}"
+        self.content_url = f"https://content.airtable.com/v0/{self.base_id}"
+        
+        # Common headers
+        self.headers = {"Authorization": f"Bearer {self.api_key}"}
+        self.json_headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+
+    async def __aenter__(self):
+        """Support for async context manager."""
+        if self._session is None:
+            self._session = aiohttp.ClientSession()
+            self._own_session = True
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Clean up resources when exiting the context manager."""
+        await self.close()
+
+    async def close(self):
+        """Close the session if we created it."""
+        if self._own_session and self._session is not None:
+            await self._session.close()
+            self._session = None
+            self._own_session = False
+
+    async def _get_session(self):
+        """Get or create an aiohttp session."""
+        if self._session is None:
+            self._session = aiohttp.ClientSession()
+            self._own_session = True
+        return self._session
 
     async def get_schema(self) -> Optional[dict]:
         """
@@ -44,17 +86,16 @@ class AirtableAsync:
         Returns:
             dict: A dictionary representing the schema of the Airtable base.
         """
-        url = f"https://api.airtable.com/v0/meta/bases/{self.base_id}/tables"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
+        url = f"{self.meta_url}/tables"
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    return await response.json()
-                else:
-                    print(f"Failed to retrieve schema. Status code: {response.status}")
-                    print(await response.text())
-                    return None
+        session = await self._get_session()
+        async with session.get(url, headers=self.headers) as response:
+            if response.status == 200:
+                return await response.json()
+            else:
+                print(f"Failed to retrieve schema. Status code: {response.status}")
+                print(await response.text())
+                return None
 
     async def extract_table_ids(self, schema: dict) -> dict:
         """
@@ -177,22 +218,17 @@ class AirtableAsync:
             - For more details on the Airtable field model and field options, refer to the official Airtable documentation:
             https://airtable.com/developers/web/api/field-model
         """
-        url = f"https://api.airtable.com/v0/meta/bases/{self.base_id}/tables/{table_id}/fields"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        url = f"{self.meta_url}/tables/{table_id}/fields"
 
-        async with aiohttp.ClientSession() as session:
-            for field in fields:
-                async with session.post(url, headers=headers, data=json.dumps(field)) as response:
-                    if response.status == 200:
-                        print(f"Field '{field['name']}' created successfully!")
-                        resp_data = await response.json()
-                        print(resp_data)
-                    else:
-                        print(f"Failed to create field '{field['name']}'. Status code: {response.status}")
-                        print(await response.text())
+        session = await self._get_session()
+        async with session.post(url, headers=self.json_headers, data=json.dumps(fields)) as response:
+            if response.status == 200:
+                print(f"Field '{fields['name']}' created successfully!")
+                resp_data = await response.json()
+                print(resp_data)
+            else:
+                print(f"Failed to create field '{fields['name']}'. Status code: {response.status}")
+                print(await response.text())
 
     async def fetch_records(
         self,
@@ -212,30 +248,29 @@ class AirtableAsync:
                 - If json_format=False, a DataFrame of records.
                 - If json_format=True, a dict with key "records" containing the raw data.
         """
-        url = f"https://api.airtable.com/v0/{self.base_id}/{table_id}"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
+        url = f"{self.record_url}/{table_id}"
 
         records = []
         offset = None
 
-        async with aiohttp.ClientSession() as session:
-            while True:
-                params = {}
-                if offset:
-                    params["offset"] = offset
+        session = await self._get_session()
+        while True:
+            params = {}
+            if offset:
+                params["offset"] = offset
 
-                async with session.get(url, headers=headers, params=params) as response:
-                    response.raise_for_status()
-                    data = await response.json()
+            async with session.get(url, headers=self.headers, params=params) as response:
+                response.raise_for_status()
+                data = await response.json()
 
-                    for record in data["records"]:
-                        record_data = record["fields"].copy()
-                        record_data["record_id"] = record["id"]
-                        records.append(record_data)
+                for record in data["records"]:
+                    record_data = record["fields"].copy()
+                    record_data["record_id"] = record["id"]
+                    records.append(record_data)
 
-                    offset = data.get("offset")
-                    if not offset:
-                        break
+                offset = data.get("offset")
+                if not offset:
+                    break
 
         if json_format:
             return {"records": records}
@@ -266,29 +301,28 @@ class AirtableAsync:
                 - If json_format=False: DataFrame containing the filtered records
                 - If json_format=True: Dictionary containing the raw API response with filtered records
         """
-        url = f"https://api.airtable.com/v0/{self.base_id}/{table_id}"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
+        url = f"{self.record_url}/{table_id}"
         records = []
         offset = None
 
-        async with aiohttp.ClientSession() as session:
-            while True:
-                params = {"filterByFormula": filter_formula}
-                if offset:
-                    params["offset"] = offset
+        session = await self._get_session()
+        while True:
+            params = {"filterByFormula": filter_formula}
+            if offset:
+                params["offset"] = offset
 
-                async with session.get(url, headers=headers, params=params) as response:
-                    response.raise_for_status()
-                    data = await response.json()
+            async with session.get(url, headers=self.headers, params=params) as response:
+                response.raise_for_status()
+                data = await response.json()
 
-                    for record in data["records"]:
-                        record_data = record["fields"].copy()
-                        record_data["record_id"] = record["id"]
-                        records.append(record_data)
+                for record in data["records"]:
+                    record_data = record["fields"].copy()
+                    record_data["record_id"] = record["id"]
+                    records.append(record_data)
 
-                    offset = data.get("offset")
-                    if not offset:
-                        break
+                offset = data.get("offset")
+                if not offset:
+                    break
 
         if json_format:
             return {"records": records}
@@ -352,33 +386,29 @@ class AirtableAsync:
                     }
                 ]
         """
-        url = f"https://api.airtable.com/v0/{self.base_id}/{table_id}"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        url = f"{self.record_url}/{table_id}"
 
         if isinstance(records, dict):
             records = [records]
 
         created_records: List[dict] = []
 
-        async with aiohttp.ClientSession() as session:
-            for i in range(0, len(records), 10):
-                batch = records[i : i + 10]
-                payload = {
-                    "records": batch,
-                    "typecast": typecast,
-                    "returnFieldsByFieldId": return_fields_by_field_id
-                }
-                async with session.post(url, headers=headers, data=json.dumps(payload)) as response:
-                    if response.status == 200:
-                        batch_response = (await response.json()).get("records", [])
-                        created_records.extend(batch_response)
-                        print(f"Batch {i//10 + 1}: Successfully created {len(batch)} records.")
-                    else:
-                        print(f"Batch {i//10 + 1}: Failed to create records. Status code: {response.status}")
-                        print(await response.text())
+        session = await self._get_session()
+        for i in range(0, len(records), 10):
+            batch = records[i : i + 10]
+            payload = {
+                "records": batch,
+                "typecast": typecast,
+                "returnFieldsByFieldId": return_fields_by_field_id
+            }
+            async with session.post(url, headers=self.json_headers, data=json.dumps(payload)) as response:
+                if response.status == 200:
+                    batch_response = (await response.json()).get("records", [])
+                    created_records.extend(batch_response)
+                    print(f"Batch {i//10 + 1}: Successfully created {len(batch)} records.")
+                else:
+                    print(f"Batch {i//10 + 1}: Failed to create records. Status code: {response.status}")
+                    print(await response.text())
 
         return created_records if created_records else None
 
@@ -419,11 +449,7 @@ class AirtableAsync:
             - Only the specified fields will be updated; other fields remain unchanged.
             - Field types must be writable as per Airtable's API specifications.
         """
-        url = f"https://api.airtable.com/v0/{self.base_id}/{table_id}/{record_id}"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        url = f"{self.record_url}/{table_id}/{record_id}"
 
         payload = {
             "fields": fields,
@@ -431,16 +457,16 @@ class AirtableAsync:
             "returnFieldsByFieldId": return_fields_by_field_id
         }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.patch(url, headers=headers, data=json.dumps(payload)) as response:
-                if response.status == 200:
-                    updated_record = await response.json()
-                    print(f"Record '{record_id}' updated successfully!")
-                    return updated_record
-                else:
-                    print(f"Failed to update record '{record_id}'. Status code: {response.status}")
-                    print(await response.text())
-                    return None
+        session = await self._get_session()
+        async with session.patch(url, headers=self.json_headers, data=json.dumps(payload)) as response:
+            if response.status == 200:
+                updated_record = await response.json()
+                print(f"Record '{record_id}' updated successfully!")
+                return updated_record
+            else:
+                print(f"Failed to update record '{record_id}'. Status code: {response.status}")
+                print(await response.text())
+                return None
 
     async def update_multiple_records(
         self,
@@ -500,11 +526,7 @@ class AirtableAsync:
             - If more than 10 records are provided, the function will batch the requests accordingly.
             - When performing upserts, ensure that 'fields_to_merge_on' uniquely identify records.
         """
-        url = f"https://api.airtable.com/v0/{self.base_id}/{table_id}"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        url = f"{self.record_url}/{table_id}"
 
         all_updated_records = {
             "records": [],
@@ -512,37 +534,37 @@ class AirtableAsync:
             "updatedRecords": []
         }
 
-        async with aiohttp.ClientSession() as session:
-            for i in range(0, len(records), 10):
-                batch = records[i : i + 10]
-                payload: Dict[str, Union[List[dict], dict]] = {
-                    "records": batch,
-                    "typecast": typecast,
-                    "returnFieldsByFieldId": return_fields_by_field_id
-                }
+        session = await self._get_session()
+        for i in range(0, len(records), 10):
+            batch = records[i : i + 10]
+            payload: Dict[str, Union[List[dict], dict]] = {
+                "records": batch,
+                "typecast": typecast,
+                "returnFieldsByFieldId": return_fields_by_field_id
+            }
 
-                if perform_upsert:
-                    if not fields_to_merge_on:
-                        print("Error: 'fields_to_merge_on' must be provided when perform_upsert is True.")
-                        return None
-                    payload["performUpsert"] = {"fieldsToMergeOn": fields_to_merge_on}
+            if perform_upsert:
+                if not fields_to_merge_on:
+                    print("Error: 'fields_to_merge_on' must be provided when perform_upsert is True.")
+                    return None
+                payload["performUpsert"] = {"fieldsToMergeOn": fields_to_merge_on}
 
-                async with session.patch(url, headers=headers, data=json.dumps(payload)) as response:
-                    if response.status == 200:
-                        batch_response = await response.json()
-                        all_updated_records["records"].extend(batch_response.get("records", []))
+            async with session.patch(url, headers=self.json_headers, data=json.dumps(payload)) as response:
+                if response.status == 200:
+                    batch_response = await response.json()
+                    all_updated_records["records"].extend(batch_response.get("records", []))
 
-                        if perform_upsert:
-                            all_updated_records["createdRecords"].extend(
-                                batch_response.get("createdRecords", [])
-                            )
-                            all_updated_records["updatedRecords"].extend(
-                                batch_response.get("updatedRecords", [])
-                            )
-                        print(f"Batch {i//10 + 1}: Successfully updated {len(batch)} records.")
-                    else:
-                        print(f"Batch {i//10 + 1}: Failed to update records. Status code: {response.status}")
-                        print(await response.text())
+                    if perform_upsert:
+                        all_updated_records["createdRecords"].extend(
+                            batch_response.get("createdRecords", [])
+                        )
+                        all_updated_records["updatedRecords"].extend(
+                            batch_response.get("updatedRecords", [])
+                        )
+                    print(f"Batch {i//10 + 1}: Successfully updated {len(batch)} records.")
+                else:
+                    print(f"Batch {i//10 + 1}: Failed to update records. Status code: {response.status}")
+                    print(await response.text())
 
         # Only return the data if we have something
         return all_updated_records if all_updated_records["records"] else None
@@ -558,18 +580,17 @@ class AirtableAsync:
         Returns:
             bool: True if the record was deleted successfully, False otherwise.
         """
-        url = f"https://api.airtable.com/v0/{self.base_id}/{table_id}/{record_id}"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
+        url = f"{self.record_url}/{table_id}/{record_id}"
 
-        async with aiohttp.ClientSession() as session:
-            async with session.delete(url, headers=headers) as response:
-                if response.status == 200:
-                    print(f"Record '{record_id}' deleted successfully!")
-                    return True
-                else:
-                    print(f"Failed to delete record '{record_id}'. Status code: {response.status}")
-                    print(await response.text())
-                    return False
+        session = await self._get_session()
+        async with session.delete(url, headers=self.headers) as response:
+            if response.status == 200:
+                print(f"Record '{record_id}' deleted successfully!")
+                return True
+            else:
+                print(f"Failed to delete record '{record_id}'. Status code: {response.status}")
+                print(await response.text())
+                return False
 
     async def delete_multiple_records(
         self,
@@ -596,27 +617,26 @@ class AirtableAsync:
             - You can delete up to 10 records per request.
             - If more than 10 records are provided, the function will batch the requests accordingly.
         """
-        url = f"https://api.airtable.com/v0/{self.base_id}/{table_id}"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
+        url = f"{self.record_url}/{table_id}"
 
         if isinstance(record_ids, str):
             record_ids = [record_ids]
 
         all_deletions: List[dict] = []
 
-        async with aiohttp.ClientSession() as session:
-            for i in range(0, len(record_ids), 10):
-                batch = record_ids[i : i + 10]
-                params = [("records[]", rid) for rid in batch]
+        session = await self._get_session()
+        for i in range(0, len(record_ids), 10):
+            batch = record_ids[i : i + 10]
+            params = [("records[]", rid) for rid in batch]
 
-                async with session.delete(url, headers=headers, params=params) as response:
-                    if response.status == 200:
-                        batch_response = (await response.json()).get("records", [])
-                        all_deletions.extend(batch_response)
-                        print(f"Batch {i//10 + 1}: Successfully deleted {len(batch)} records.")
-                    else:
-                        print(f"Batch {i//10 + 1}: Failed to delete records. Status code: {response.status}")
-                        print(await response.text())
+            async with session.delete(url, headers=self.headers, params=params) as response:
+                if response.status == 200:
+                    batch_response = (await response.json()).get("records", [])
+                    all_deletions.extend(batch_response)
+                    print(f"Batch {i//10 + 1}: Successfully deleted {len(batch)} records.")
+                else:
+                    print(f"Batch {i//10 + 1}: Failed to delete records. Status code: {response.status}")
+                    print(await response.text())
 
         return all_deletions if all_deletions else None
 
@@ -647,11 +667,7 @@ class AirtableAsync:
             - Ensure that the attachment field is configured to accept attachments.
             - The 'file_bytes' should be base64 encoded before being passed to the function.
         """
-        url = f"https://content.airtable.com/v0/{self.base_id}/{record_id}/{attachment_field}/uploadAttachment"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        url = f"{self.content_url}/{record_id}/{attachment_field}/uploadAttachment"
         encoded_file = base64.b64encode(file_bytes).decode("utf-8")
 
         payload = {
@@ -660,17 +676,17 @@ class AirtableAsync:
             "filename": filename
         }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, data=json.dumps(payload)) as response:
-                if response.status == 200:
-                    attachment_response = await response.json()
-                    print(f"Attachment '{filename}' uploaded successfully to record '{record_id}'!")
-                    return attachment_response
-                else:
-                    print(f"Failed to upload attachment '{filename}' to record '{record_id}'. "
-                          f"Status code: {response.status}")
-                    print(await response.text())
-                    return None
+        session = await self._get_session()
+        async with session.post(url, headers=self.json_headers, data=json.dumps(payload)) as response:
+            if response.status == 200:
+                attachment_response = await response.json()
+                print(f"Attachment '{filename}' uploaded successfully to record '{record_id}'!")
+                return attachment_response
+            else:
+                print(f"Failed to upload attachment '{filename}' to record '{record_id}'. "
+                      f"Status code: {response.status}")
+                print(await response.text())
+                return None
 
     async def update_field(
         self,
@@ -700,11 +716,7 @@ class AirtableAsync:
             print("Error: At least one of 'name' or 'description' must be provided.")
             return None
 
-        url = f"https://api.airtable.com/v0/meta/bases/{self.base_id}/tables/{table_id}/fields/{column_id}"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        url = f"{self.meta_url}/tables/{table_id}/fields/{column_id}"
 
         payload: Dict[str, str] = {}
         if name:
@@ -712,13 +724,13 @@ class AirtableAsync:
         if description:
             payload["description"] = description
 
-        async with aiohttp.ClientSession() as session:
-            async with session.patch(url, headers=headers, data=json.dumps(payload)) as response:
-                if response.status == 200:
-                    updated_field = await response.json()
-                    print(f"Field '{column_id}' updated successfully!")
-                    return updated_field
-                else:
-                    print(f"Failed to update field '{column_id}'. Status code: {response.status}")
-                    print(await response.text())
-                    return None
+        session = await self._get_session()
+        async with session.patch(url, headers=self.json_headers, data=json.dumps(payload)) as response:
+            if response.status == 200:
+                updated_field = await response.json()
+                print(f"Field '{column_id}' updated successfully!")
+                return updated_field
+            else:
+                print(f"Failed to update field '{column_id}'. Status code: {response.status}")
+                print(await response.text())
+                return None

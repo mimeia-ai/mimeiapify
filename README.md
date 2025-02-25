@@ -1,7 +1,6 @@
-"""
 # SNCL - Sasha Nicolai's Library (Version 1.0.2, 2025-01-20)
 
-SNCL is a Python library designed to host several API integrations and utility functions. Currently, it provides support for Airtable API interactions, with plans to expand to other APIs in the future.
+SNCL is a Python library designed to host several API integrations and utility functions. Currently, it provides support for Airtable API interactions and Wompi payment platform integrations, with plans to expand to other APIs in the future.
 
 ---
 
@@ -23,11 +22,24 @@ The library provides two interfaces:
 - **Airtable**: A synchronous interface for Airtable API interactions.
 - **AirtableAsync**: An asynchronous interface for Airtable API interactions.
 
+### Wompi
+The library provides integration with the Wompi payment platform. For detailed documentation on the Wompi API itself, visit: [Wompi API Documentation](https://docs.wompi.co/en).
+
+Supported Wompi operations include:
+- Generating checkout URLs for payment processing
+- Retrieving transaction information
+- Verifying webhook events for payment notifications
+- Supporting both sandbox and production environments
+
+The library currently offers:
+- **WompiAsync**: An asynchronous interface for Wompi payment platform interactions.
+
 ## Future Plans
 
 - Add integrations for additional APIs (Notion, WhatsApp, Gmail).
 - Expand utility functions for data processing and manipulation.
 - Provide improved error handling and logging for all operations.
+- Add synchronous interface for Wompi integration.
 
 ---
 
@@ -299,4 +311,3 @@ This library is licensed under the [MIT License](LICENSE).
 ---
 
 For questions, feedback, or contributions, contact [Sasha Nicolai](mailto:sasha@candyflip.co).
-"""

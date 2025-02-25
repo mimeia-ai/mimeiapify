@@ -1,4 +1,4 @@
-# SNCL - Sasha Nicolai's Library (Version 1.0.2, 2025-01-20)
+# SNCL - Sasha Nicolai's Library (Version 1.2.0, 2025-02-25)
 
 SNCL is a Python library designed to host several API integrations and utility functions. Currently, it provides support for Airtable API interactions and Wompi payment platform integrations, with plans to expand to other APIs in the future.
 

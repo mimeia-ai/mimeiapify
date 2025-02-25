@@ -10,7 +10,7 @@ def read_long_description():
 
 setup(
     name='sncl',  # Your package name
-    version='1.1.0',  # Version of your package
+    version='1.2.0',  # Version of your package
     packages=find_packages(),  # Automatically find all packages in your project
     install_requires=[
         'requests',  # Add your dependencies here
@@ -19,7 +19,7 @@ setup(
         'aiohttp',
         'asyncio'
     ],
-    description="A utility library for Airtable API interactions",  # Short description
+    description="A utility library for API interactions including Wompi payments and Airtable",  # Short description
     long_description=read_long_description(),  # Use README.md as the long description
     long_description_content_type="text/markdown",  # Specify Markdown format for the README
     author='Sasha Nicolai Canal',  # Update with your name

@@ -20,19 +20,20 @@ Supported Airtable operations include:
 
 The library provides two interfaces:
 - **Airtable**: A synchronous interface for Airtable API interactions.
-- **AirtableAsync**: An asynchronous interface for Airtable API interactions.
+- **AirtableAsync**: An asynchronous interface for Airtable API interactions with optimized session management.
 
 ### Wompi
-The library provides integration with the Wompi payment platform. For detailed documentation on the Wompi API itself, visit: [Wompi API Documentation](https://docs.wompi.co/en).
+The library provides comprehensive integration with the Wompi payment platform, a popular payment solution in Latin America. For detailed documentation on the Wompi API itself, visit: [Wompi API Documentation](https://docs.wompi.co/en).
 
 Supported Wompi operations include:
-- Generating checkout URLs for payment processing
-- Retrieving transaction information
-- Verifying webhook events for payment notifications
+- Generating checkout URLs for payment processing with full support for all parameters
+- Retrieving transaction information by ID or reference
+- Verifying webhook events for payment notifications with secure cryptographic validation
 - Supporting both sandbox and production environments
+- Flexible session management for optimized HTTP connection handling
 
 The library currently offers:
-- **WompiAsync**: An asynchronous interface for Wompi payment platform interactions.
+- **WompiAsync**: An asynchronous interface for Wompi payment platform interactions with efficient session management.
 
 ## Future Plans
 
@@ -73,7 +74,9 @@ print(schema)
 
 ## Usage (Asynchronous)
 
-To use the async interface, import the `AirtableAsync` class:
+### Airtable Async
+
+To use the Airtable async interface, import the `AirtableAsync` class:
 
 ```python
 from sncl.airtable_async import AirtableAsync
@@ -89,6 +92,197 @@ async def main():
 
 # Run the async entry point
 asyncio.run(main())
+```
+
+### Wompi Async
+
+To use the Wompi async interface, import the `WompiAsync` class:
+
+```python
+from sncl.wompi_async import WompiAsync
+import asyncio
+
+async def main():
+    # Initialize
+    wompi = WompiAsync(
+        public_key="your_public_key", 
+        integrity_key="your_integrity_key",
+        environment="sandbox"  # or "production"
+    )
+
+    # Example: Generate a checkout URL
+    checkout_data = await wompi.generate_checkout_url(
+        amount_in_cents=10000,  # 100.00 in currency
+        currency="COP",
+        redirect_url="https://your-site.com/success"
+    )
+    
+    print(f"Checkout URL: {checkout_data['checkout_url']}")
+    print(f"Reference: {checkout_data['reference']}")
+
+# Run the async entry point
+asyncio.run(main())
+```
+
+---
+
+## Optimized Session Management
+
+Both `AirtableAsync` and `WompiAsync` classes support efficient session management to optimize HTTP connections and improve performance. There are three ways to manage the HTTP session:
+
+### 1. Automatic Session Management
+
+The simplest approach is to let the library manage sessions automatically:
+
+```python
+# Session is created when needed and closed when done
+async def fetch_data():
+    airtable = AirtableAsync(base_id="your_base_id", api_key="your_api_key")
+    data = await airtable.fetch_records("your_table_id")
+    # Session is automatically cleaned up when airtable is garbage collected
+    return data
+```
+
+### 2. Using Async Context Manager
+
+For more controlled session management:
+
+```python
+async def fetch_with_context():
+    async with AirtableAsync(base_id="your_base_id", api_key="your_api_key") as airtable:
+        # Session is created when entering the context
+        data = await airtable.fetch_records("your_table_id")
+        # Session is automatically closed when exiting the context
+        return data
+```
+
+### 3. Sharing an External Session
+
+For maximum efficiency, especially in applications making multiple API calls:
+
+```python
+import aiohttp
+
+async def fetch_with_shared_session():
+    # Create a shared session
+    async with aiohttp.ClientSession() as session:
+        # Pass the session to both clients
+        airtable = AirtableAsync(base_id="your_base_id", api_key="your_api_key", session=session)
+        wompi = WompiAsync(public_key="your_key", integrity_key="your_key", session=session)
+        
+        # Make API calls with both clients using the same session
+        airtable_data = await airtable.fetch_records("your_table_id")
+        wompi_data = await wompi.get_transaction_by_reference("your_reference")
+        
+        # The shared session is managed by the caller, not the API clients
+        return airtable_data, wompi_data
+```
+
+---
+
+## Wompi Examples
+
+### Generating a Checkout URL
+
+```python
+from sncl.wompi_async import WompiAsync
+import asyncio
+
+async def create_payment_link():
+    wompi = WompiAsync(
+        public_key="your_public_key", 
+        integrity_key="your_integrity_key"
+    )
+    
+    # Generate a checkout URL with custom parameters
+    checkout_data = await wompi.generate_checkout_url(
+        amount_in_cents=15000,
+        currency="COP",
+        reference="INV-001",  # Optional: provide your own reference
+        redirect_url="https://yoursite.com/payment/success",
+        expiration_time="2023-12-31T23:59:59+00:00",  # ISO8601 format
+        tax_vat_in_cents=2850,  # VAT/IVA
+        customer_data={
+            "email": "customer@example.com",
+            "full-name": "John Doe",
+            "phone-number": "3001234567",
+            "phone-number-prefix": "+57"  # Colombia
+        },
+        collect_shipping=False
+    )
+    
+    return checkout_data["checkout_url"]
+```
+
+### Verifying a Webhook Event
+
+```python
+from sncl.wompi_async import WompiAsync
+from fastapi import FastAPI, Request, HTTPException
+
+app = FastAPI()
+
+@app.post("/wompi-webhook")
+async def handle_wompi_webhook(request: Request):
+    # Get the raw event data from the request
+    event_data = await request.json()
+    
+    # Your Events Secret from the Wompi dashboard
+    events_secret = "your_events_secret"
+    
+    # Verify the event is authentic
+    is_valid = WompiAsync.verify_webhook_event(event_data, events_secret)
+    
+    if not is_valid:
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
+    
+    # Process the valid event
+    event_type = event_data.get("event")
+    if event_type == "transaction.updated":
+        # Handle successful payment
+        transaction = event_data.get("data", {}).get("transaction", {})
+        status = transaction.get("status")
+        
+        if status == "APPROVED":
+            # Payment was successful
+            reference = transaction.get("reference")
+            amount = transaction.get("amount_in_cents")
+            
+            # Update your database or perform business logic
+            await update_order_status(reference, "paid", amount)
+    
+    return {"status": "success"}
+```
+
+### Retrieving Transaction Data
+
+```python
+from sncl.wompi_async import WompiAsync
+import asyncio
+
+async def check_transaction_status(reference):
+    async with WompiAsync(
+        public_key="your_public_key", 
+        integrity_key="your_integrity_key"
+    ) as wompi:
+        # Get transactions by reference
+        transactions = await wompi.get_transaction_by_reference(reference)
+        
+        if transactions:
+            # Get the first matching transaction
+            transaction_id = transactions[0]["id"]
+            
+            # Get detailed transaction information
+            details = await wompi.get_transaction(transaction_id)
+            
+            return {
+                "status": details["data"]["status"],
+                "payment_method": details["data"]["payment_method_type"],
+                "amount": details["data"]["amount_in_cents"] / 100,  # Convert to currency units
+                "created_at": details["data"]["created_at"]
+            }
+        
+        return {"status": "not_found"}
 ```
 
 ---
@@ -158,8 +352,6 @@ The purpose of the Class Manager pattern is to encapsulate the setup of your Air
 #### Example Code
 
 ```python
-import asyncio
-Edit
 import asyncio
 from fastapi import FastAPI
 from sncl.airtable_async import AirtableAsync
@@ -272,19 +464,20 @@ Airtable imposes rate limits, and you may want to **throttle** or **delay** your
    # results = asyncio.run(main())
    ```
 
-Each approach can be fine-tuned to your project’s needs. The token bucket or semaphore pattern is often the most flexible and powerful for controlling concurrency in a production environment.
+Each approach can be fine-tuned to your project's needs. The token bucket or semaphore pattern is often the most flexible and powerful for controlling concurrency in a production environment.
 
 ---
 
 ## Getting Help
 
-To get help on any function in the `Airtable` or `AirtableAsync` classes, you can use Python’s built-in `help()` function. For example:
+To get help on any function in the `Airtable`, `AirtableAsync`, or `WompiAsync` classes, you can use Python's built-in `help()` function. For example:
 
 ```python
 help(AirtableAsync.fetch_records)
+help(WompiAsync.generate_checkout_url)
 ```
 
-This will display the function’s docstring, including its purpose, arguments, and return values.
+This will display the function's docstring, including its purpose, arguments, and return values.
 
 ---
 

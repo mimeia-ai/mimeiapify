@@ -22,6 +22,19 @@ class Airtable:
         """
         self.base_id = base_id
         self.api_key = api_key
+        
+        # Base API URLs
+        self.api_base_url = "https://api.airtable.com/v0"
+        self.meta_url = f"{self.api_base_url}/meta/bases/{self.base_id}"
+        self.record_url = f"{self.api_base_url}/{self.base_id}"
+        self.content_url = f"https://content.airtable.com/v0/{self.base_id}"
+        
+        # Common headers
+        self.headers = {"Authorization": f"Bearer {self.api_key}"}
+        self.json_headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
 
     def get_schema(self) -> Optional[dict]:
         """
@@ -30,9 +43,8 @@ class Airtable:
         Returns:
             dict: A dictionary representing the schema of the Airtable base.
         """
-        url = f"https://api.airtable.com/v0/meta/bases/{self.base_id}/tables"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
-        response = requests.get(url, headers=headers)
+        url = f"{self.meta_url}/tables"
+        response = requests.get(url, headers=self.headers)
         if response.status_code == 200:
             return response.json()
         else:
@@ -160,14 +172,10 @@ class Airtable:
             - For more details on the Airtable field model and field options, refer to the official Airtable documentation:
             https://airtable.com/developers/web/api/field-model
         """
-        url = f"https://api.airtable.com/v0/meta/bases/{self.base_id}/tables/{table_id}/fields"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        url = f"{self.meta_url}/tables/{table_id}/fields"
 
         for field in fields:
-            response = requests.post(url, headers=headers, data=json.dumps(field))
+            response = requests.post(url, headers=self.json_headers, data=json.dumps(field))
             if response.status_code == 200:
                 print(f"Field '{field['name']}' created successfully!")
                 print(response.json())
@@ -192,8 +200,7 @@ class Airtable:
                 - If json_format=False, a DataFrame of records.
                 - If json_format=True, a dict with key "records" containing the raw data.
         """
-        url = f"https://api.airtable.com/v0/{self.base_id}/{table_id}"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
+        url = f"{self.record_url}/{table_id}"
 
         records = []
         offset = None
@@ -203,7 +210,7 @@ class Airtable:
             if offset:
                 params["offset"] = offset
 
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=self.headers, params=params)
             response.raise_for_status()
             data = response.json()
 
@@ -243,8 +250,7 @@ class Airtable:
                 - If json_format=False: DataFrame containing the filtered records
                 - If json_format=True: Dictionary containing the raw API response with filtered records
         """
-        url = f"https://api.airtable.com/v0/{self.base_id}/{table_id}"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
+        url = f"{self.record_url}/{table_id}"
 
         records = []
         offset = None
@@ -254,7 +260,7 @@ class Airtable:
             if offset:
                 params["offset"] = offset
 
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=self.headers, params=params)
             response.raise_for_status()
             data = response.json()
 
@@ -327,11 +333,7 @@ class Airtable:
                     }
                 ]
         """
-        url = f"https://api.airtable.com/v0/{self.base_id}/{table_id}"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        url = f"{self.record_url}/{table_id}"
 
         if isinstance(records, dict):
             records = [records]
@@ -345,7 +347,7 @@ class Airtable:
                 "typecast": typecast,
                 "returnFieldsByFieldId": return_fields_by_field_id
             }
-            response = requests.post(url, headers=headers, data=json.dumps(payload))
+            response = requests.post(url, headers=self.json_headers, data=json.dumps(payload))
 
             if response.status_code == 200:
                 batch_response = response.json().get("records", [])
@@ -394,11 +396,7 @@ class Airtable:
             - Only the specified fields will be updated; other fields remain unchanged.
             - Field types must be writable as per Airtable's API specifications.
         """
-        url = f"https://api.airtable.com/v0/{self.base_id}/{table_id}/{record_id}"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        url = f"{self.record_url}/{table_id}/{record_id}"
 
         payload = {
             "fields": fields,
@@ -406,7 +404,7 @@ class Airtable:
             "returnFieldsByFieldId": return_fields_by_field_id
         }
 
-        response = requests.patch(url, headers=headers, data=json.dumps(payload))
+        response = requests.patch(url, headers=self.json_headers, data=json.dumps(payload))
         if response.status_code == 200:
             updated_record = response.json()
             print(f"Record '{record_id}' updated successfully!")
@@ -472,11 +470,7 @@ class Airtable:
             - If more than 10 records are provided, the function will batch the requests accordingly.
             - When performing upserts, ensure that 'fields_to_merge_on' uniquely identify records.
     """
-        url = f"https://api.airtable.com/v0/{self.base_id}/{table_id}"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        url = f"{self.record_url}/{table_id}"
 
         all_updated_records = {
             "records": [],
@@ -498,7 +492,7 @@ class Airtable:
                     return None
                 payload["performUpsert"] = {"fieldsToMergeOn": fields_to_merge_on}
 
-            response = requests.patch(url, headers=headers, data=json.dumps(payload))
+            response = requests.patch(url, headers=self.json_headers, data=json.dumps(payload))
             if response.status_code == 200:
                 batch_response = response.json()
                 all_updated_records["records"].extend(batch_response.get("records", []))
@@ -525,10 +519,9 @@ class Airtable:
         Returns:
             bool: True if the record was deleted successfully, False otherwise.
         """
-        url = f"https://api.airtable.com/v0/{self.base_id}/{table_id}/{record_id}"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
+        url = f"{self.record_url}/{table_id}/{record_id}"
 
-        response = requests.delete(url, headers=headers)
+        response = requests.delete(url, headers=self.headers)
         if response.status_code == 200:
             print(f"Record '{record_id}' deleted successfully!")
             return True
@@ -558,8 +551,7 @@ class Airtable:
             - You can delete up to 10 records per request.
             - If more than 10 records are provided, the function will batch the requests accordingly.
         """
-        url = f"https://api.airtable.com/v0/{self.base_id}/{table_id}"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
+        url = f"{self.record_url}/{table_id}"
 
         if isinstance(record_ids, str):
             record_ids = [record_ids]
@@ -569,7 +561,7 @@ class Airtable:
         for i in range(0, len(record_ids), 10):
             batch = record_ids[i:i+10]
             params = {"records[]": batch}
-            response = requests.delete(url, headers=headers, params=params)
+            response = requests.delete(url, headers=self.headers, params=params)
 
             if response.status_code == 200:
                 batch_response = response.json().get("records", [])
@@ -608,12 +600,8 @@ class Airtable:
             - Ensure that the attachment field is configured to accept attachments.
             - The 'file_bytes' should be base64 encoded before being passed to the function.
         """
-        # This endpoint is still in alpha/beta and may differ depending on your account
-        url = f"https://content.airtable.com/v0/{self.base_id}/{record_id}/{attachment_field}/uploadAttachment"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        url = f"{self.content_url}/{record_id}/{attachment_field}/uploadAttachment"
+        
         encoded_file = base64.b64encode(file_bytes).decode("utf-8")
 
         payload = {
@@ -622,7 +610,7 @@ class Airtable:
             "filename": filename
         }
 
-        response = requests.post(url, headers=headers, data=json.dumps(payload))
+        response = requests.post(url, headers=self.json_headers, data=json.dumps(payload))
         if response.status_code == 200:
             attachment_response = response.json()
             print(f"Attachment '{filename}' uploaded successfully to record '{record_id}'!")
@@ -658,11 +646,7 @@ class Airtable:
             print("Error: At least one of 'name' or 'description' must be provided.")
             return None
 
-        url = f"https://api.airtable.com/v0/meta/bases/{self.base_id}/tables/{table_id}/fields/{column_id}"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        url = f"{self.meta_url}/tables/{table_id}/fields/{column_id}"
 
         payload = {}
         if name:
@@ -670,7 +654,7 @@ class Airtable:
         if description:
             payload["description"] = description
 
-        response = requests.patch(url, headers=headers, data=json.dumps(payload))
+        response = requests.patch(url, headers=self.json_headers, data=json.dumps(payload))
         if response.status_code == 200:
             updated_field = response.json()
             print(f"Field '{column_id}' updated successfully!")

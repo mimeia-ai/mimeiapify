@@ -1,6 +1,6 @@
-# SNCL - Sasha Nicolai's Library (Version 1.2.0, 2025-02-25)
+# Mimeiapify (Version 1.2.0, 2025-02-25)
 
-SNCL is a Python library designed to host several API integrations and utility functions. Currently, it provides support for Airtable API interactions and Wompi payment platform integrations, with plans to expand to other APIs in the future.
+Mimeiapify is a Python library designed to host several API integrations and utility functions. Currently, it provides support for Airtable API interactions and Wompi payment platform integrations, with plans to expand to other APIs in the future.
 
 ---
 
@@ -46,9 +46,9 @@ The library currently offers:
 
 ## Installation
 
-### Pip Install
+### UV Install
 ```bash
-pip install sncl
+uv add mimeiapify
 ```
 
 This will make the library available for use across your projects.
@@ -57,10 +57,10 @@ This will make the library available for use across your projects.
 
 ## Usage (Synchronous)
 
-To start using the `sncl` library in synchronous code, import the `Airtable` class:
+To start using the `mimeiapify` library in synchronous code, import the `Airtable` class:
 
 ```python
-from sncl import Airtable
+from mimeiapify import Airtable
 
 # Initialize
 airtable = Airtable(base_id="your_base_id", api_key="your_api_key")
@@ -79,7 +79,7 @@ print(schema)
 To use the Airtable async interface, import the `AirtableAsync` class:
 
 ```python
-from sncl.airtable_async import AirtableAsync
+from mimeiapify.airtable_async import AirtableAsync
 import asyncio
 
 async def main():
@@ -99,7 +99,7 @@ asyncio.run(main())
 To use the Wompi async interface, import the `WompiAsync` class:
 
 ```python
-from sncl.wompi_async import WompiAsync
+from mimeiapify.wompi_async import WompiAsync
 import asyncio
 
 async def main():
@@ -185,7 +185,7 @@ async def fetch_with_shared_session():
 ### Generating a Checkout URL
 
 ```python
-from sncl.wompi_async import WompiAsync
+from mimeiapify.wompi_async import WompiAsync
 import asyncio
 
 async def create_payment_link():
@@ -217,7 +217,7 @@ async def create_payment_link():
 ### Verifying a Webhook Event
 
 ```python
-from sncl.wompi_async import WompiAsync
+from mimeiapify.wompi_async import WompiAsync
 from fastapi import FastAPI, Request, HTTPException
 
 app = FastAPI()
@@ -257,7 +257,7 @@ async def handle_wompi_webhook(request: Request):
 ### Retrieving Transaction Data
 
 ```python
-from sncl.wompi_async import WompiAsync
+from mimeiapify.wompi_async import WompiAsync
 import asyncio
 
 async def check_transaction_status(reference):
@@ -293,7 +293,7 @@ Below is a minimal FastAPI example demonstrating how to integrate `AirtableAsync
 
 ```python
 from fastapi import FastAPI
-from sncl.airtable_async import AirtableAsync
+from mimeiapify.airtable_async import AirtableAsync
 
 app = FastAPI()
 
@@ -354,7 +354,7 @@ The purpose of the Class Manager pattern is to encapsulate the setup of your Air
 ```python
 import asyncio
 from fastapi import FastAPI
-from sncl.airtable_async import AirtableAsync
+from mimeiapify.airtable_async import AirtableAsync
 
 # 1) Create a Manager class that holds a single AirtableAsync instance
 class AirtableManager:
@@ -406,7 +406,7 @@ Airtable imposes rate limits, and you may want to **throttle** or **delay** your
 1. **Explicit Delay in Your Code**  
    Simply call `await asyncio.sleep(...)` after your Airtable call:
    ```python
-   from sncl.airtable_async import AirtableAsync
+   from mimeiapify.airtable_async import AirtableAsync
    import asyncio
 
    async def create_records_with_sleep():
@@ -420,7 +420,7 @@ Airtable imposes rate limits, and you may want to **throttle** or **delay** your
    ```python
    import asyncio
    import functools
-   from sncl.airtable_async import AirtableAsync
+   from mimeiapify.airtable_async import AirtableAsync
 
    def rate_limit(delay: float = 1.0):
        def decorator(func):
@@ -445,7 +445,7 @@ Airtable imposes rate limits, and you may want to **throttle** or **delay** your
    A more advanced pattern involves a semaphore to limit concurrent requests. For instance:
    ```python
    import asyncio
-   from sncl.airtable_async import AirtableAsync
+   from mimeiapify.airtable_async import AirtableAsync
 
    # Global semaphore (e.g., allow 5 concurrent Airtable calls)
    airtable_semaphore = asyncio.Semaphore(5)
@@ -483,7 +483,7 @@ This will display the function's docstring, including its purpose, arguments, an
 
 ## Dependencies
 
-The following libraries are required to use `sncl`:
+The following libraries are required to use `mimeiapify`:
 
 - **requests**: For making HTTP requests in the synchronous API.
 - **aiohttp**: For making HTTP requests in the asynchronous API.

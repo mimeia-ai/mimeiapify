@@ -30,6 +30,6 @@ setup(
         "License :: OSI Approved :: MIT License",  # Update if not using MIT
         "Operating System :: OS Independent",
     ],
-    python_requires='>=3.8',  # Minimum Python version requirement
+    python_requires='>=3.12',  # Minimum Python version requirement
     license="MIT",  # Update if not using MIT
 )

@@ -1,6 +1,6 @@
 # Mimeiapify (Version 1.2.0, 2025-02-25)
 
-Mimeiapify is a Python library designed to host several API integrations and utility functions. Currently, it provides support for Airtable API interactions and Wompi payment platform integrations, with plans to expand to other APIs in the future.
+Mimeiapify is a Python library designed to host several API integrations and utility functions. It currently bundles an Airtable client, a full Wompi payment wrapper and a new **symphony_ai** module which provides concurrency utilities and Redis-backed state management for [Agency-Swarm](https://github.com/VRSEN/agency-swarm) agents. More integrations are planned for future releases.
 
 ---
 
@@ -494,6 +494,101 @@ You can install these dependencies using:
 ```bash
 pip install requests aiohttp pandas
 ```
+
+---
+
+## Symphony-AI × Agency-Swarm — Concurrency + Redis Integration Guide
+
+| Layer              | What we added                                                                                                                                                                                           | Why it matters                                                                                |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **Infrastructure** | **`GlobalSymphony`** singleton → event-loop + 3 named `ThreadPoolExecutor`s + Redis client + CapacityLimiter                                                                                            | Keeps blocking Agency-Swarm work off the FastAPI loop while sharing one Redis pool per worker |
+| **Redis plumbing** | • `redis_client.py` (fork-safe pool)<br>• `redis/ops.py` (atomic helpers)<br>• `serde.py` (swap JSON↔MsgPack later)<br>• `key_factory.py` (names all keys)<br>• `tenant_cache.py` (TTL + helper mix-in) | Zero duplicated socket code; one place for key rules and (de)serialisation                    |
+| **Domain repos**   | `SharedStateRepo`, `UserRepo`, `HandlerRepo`, … (all subclass `TenantCache`)                                                                                                                            | Each repo ≤ 150 LOC, single responsibility, testable with `fakeredis`                         |
+| **Tool shim**      | `AsyncBaseTool` overrides `self._shared_state` to read a **ContextVar** (`_current_ss`)                                                                                                                 | Removes the unsafe global `BaseTool._shared_state = …` assignment race                        |
+| **FastAPI glue**   | In the request/web-socket handler:<br>`python<br>ss = SharedStateRepo(tenant=t_id, user_id=u_id)<br>tok = _current_ss.set(ss)<br>try: result = await call_agent()<br>finally: _current_ss.reset(tok)`   | Every in-flight coroutine—and its thread-pool jobs—sees the **correct** per-user SharedState  |
+
+### Quick-start checklist
+
+```bash
+pip install symphony-concurrency  # your private wheel
+```
+
+#### 1. FastAPI lifespan
+
+```python
+from contextlib import asynccontextmanager
+from symphony_concurrency.globals import GlobalSymphony, GlobalSymphonyConfig
+from symphony_concurrency.utils.logger import setup_logging
+from symphony_concurrency.redis.context import _current_ss
+from symphony_concurrency.redis.shared_state import SharedStateRepo
+
+@asynccontextmanager
+async def lifespan(app):
+    setup_logging(level="INFO", mode="DEV", log_dir="./logs")
+    await GlobalSymphony.create(GlobalSymphonyConfig(redis_url="redis://cache/0"))
+    yield                                     # shutdown handled automatically
+```
+
+#### 2. Request / WebSocket handler
+
+```python
+async def handle_message(tenant: str, user_id: str, text: str):
+    ss = SharedStateRepo(tenant=tenant, user_id=user_id)           # ①
+    token = _current_ss.set(ss)                                    # ② bind ContextVar
+    try:
+        pool = GlobalSymphony.get().pool_user
+        fut  = pool.submit(lambda: agency.get_completion(text))    # ③ sync API call
+        return await asyncio.wrap_future(fut)
+    finally:
+        _current_ss.reset(token)                                   # ④ avoid leaks
+```
+
+#### 3. Inside any Tool
+
+```python
+class RememberStep(AsyncBaseTool):
+    def run(self, state_name: str, step: int):
+        coro = self._shared_state.set_field(state_name, "step", step)
+        loop = GlobalSymphony.get().loop
+        return asyncio.run_coroutine_threadsafe(coro, loop).result()
+```
+
+### Current implementation status  ✅
+
+* **Global orchestration** (`globals.py`) finished; pools tuned for network I/O.
+* **Redis connectivity** fork-safe; pool caps @ 64 sockets per worker.
+* **Core utils**: Rich logger, BoundedExecutor, ContextVar wiring.
+* **Redis repos**: `SharedStateRepo`  (complete), `UserRepo`  (sketched), other repos stubs ready.
+* **Agency-Swarm bridge**: `AsyncBaseTool` property override done; Send-message streaming via Redis pub/sub queued for next sprint.
+
+### Roadmap
+
+1. **Unit-tests** with `fakeredis.asyncio` (P0).
+2. Full `UserRepo`, `HandlerRepo`, `TableRepo` implementation (P1).
+3. Prometheus metrics for pool queue length + loop latency (P1).
+4. Optional Temporal workflow driver for CPU-heavy Tool chains (P2).
+
+### How Shared-State flows per request
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant FastAPI-Coro
+    participant ThreadPool
+    participant Tool
+    Client->>FastAPI-Coro: Websocket msg
+    FastAPI-Coro->>FastAPI-Coro: _current_ss.set(SharedStateRepo(...))
+    FastAPI-Coro->>ThreadPool: agency.get_completion()
+    ThreadPool->>Tool: Tool.run()
+    Tool->>Tool: self._shared_state → SS of this request
+    Tool->>Redis: async hset / hget via run_coroutine_threadsafe
+    Redis-->>Tool: result
+    Tool-->>ThreadPool: return
+    ThreadPool-->>FastAPI-Coro: result
+```
+
+With `ContextVar`, each coroutine & its downstream worker threads
+*automatically* carry the right `SharedStateRepo`—no global mutation, no races.
 
 ---
 

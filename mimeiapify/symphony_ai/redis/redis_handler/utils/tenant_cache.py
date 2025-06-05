@@ -4,7 +4,7 @@ from typing import Optional, Dict, List, Any
 import logging
 
 from .key_factory import KeyFactory
-from ..ops import (
+from ...ops import (
     hset_with_expire, hgetall, hget, hincrby_with_expire, 
     delete, exists, expire, get_ttl, scan_keys
 )

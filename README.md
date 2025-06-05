@@ -1,4 +1,4 @@
-# Mimeiapify (Version 1.3.1, 2025-06-04)
+# Mimeiapify (Version 1.3.2, 2025-06-04)
 
 Mimeiapify is a Python library designed to host several API integrations and utility functions. It currently bundles an Airtable client, a full Wompi payment wrapper and a new **symphony_ai** module which provides concurrency utilities and Redis-backed state management for [Agency-Swarm](https://github.com/VRSEN/agency-swarm) agents. More integrations are planned for future releases.
 
@@ -510,16 +510,16 @@ pip install requests aiohttp pandas
 ### Quick-start checklist
 
 ```bash
-pip install symphony-concurrency  # your private wheel
+uv add mimeiapify  # your private wheel
 ```
 
 #### 1. FastAPI lifespan
 
 ```python
 from contextlib import asynccontextmanager
-from symphony_concurrency.globals import GlobalSymphony, GlobalSymphonyConfig
-from symphony_concurrency.utils.logger import setup_logging
-from symphony_concurrency.redis import _current_ss, SharedStateRepo
+from mimieiapify.symphony_ai.globals import GlobalSymphony, GlobalSymphonyConfig
+from mimieiapify.symphony_ai.utils.logger import setup_logging
+from mimieiapify.symphony_ai.redis import _current_ss, SharedStateRepo
 
 @asynccontextmanager
 async def lifespan(app):

@@ -4,7 +4,7 @@ Redis Handler Package - Refactored from God Class
 This package refactors the monolithic RedisHandler class following SOLID principles:
 
 Single Responsibility:
-- UserRepo: User data management
+- RedisUser: User data management
 - HandlerRepo: Handler state management  
 - TableRepo: Table/DataFrame operations
 - TriggerRepo: Expiration trigger management
@@ -19,9 +19,9 @@ Each repository inherits from TenantCache which provides:
 - Serialization via serde module
 
 Usage:
-    from symphony_ai.redis.redis_handler import UserRepo, HandlerRepo, SharedStateRepo
+    from symphony_ai.redis.redis_handler import RedisUser, HandlerRepo, SharedStateRepo
     
-    users = UserRepo(tenant="my_tenant", ttl_default=3600)
+    users = RedisUser(tenant="my_tenant", ttl_default=3600)
     await users.upsert("user123", {"name": "Alice", "score": 100})
     
     handlers = HandlerRepo(tenant="my_tenant") 
@@ -31,7 +31,7 @@ Usage:
     await shared_state.set("conversation", {"step": 1, "context": {...}})
 """
 
-from .user_repo import UserRepo
+from .redis_user import RedisUser
 from .handler_repo import HandlerRepo
 from .table_repo import TableRepo
 from .trigger_repo import TriggerRepo
@@ -43,7 +43,7 @@ from .key_factory import KeyFactory
 from . import serde
 
 __all__ = [
-    "UserRepo",
+    "RedisUser",
     "HandlerRepo", 
     "TableRepo",
     "TriggerRepo",

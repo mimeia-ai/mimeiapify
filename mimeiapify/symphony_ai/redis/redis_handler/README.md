@@ -10,7 +10,7 @@ This package refactors the monolithic `RedisHandler` God class (754 lines) into 
 ├─ KeyFactory            ← Stateless key building rules  
 ├─ serde                 ← JSON/Enum/DateTime/BaseModel serialization
 │
-├─ UserRepo              ← User data management
+├─ RedisUser             ← User data management
 ├─ HandlerRepo           ← Handler state management
 ├─ TableRepo             ← Table/DataFrame operations
 ├─ TriggerRepo           ← Expiration trigger management
@@ -24,10 +24,10 @@ This package refactors the monolithic `RedisHandler` God class (754 lines) into 
 ### Basic Usage
 
 ```python
-from symphony_ai.redis.redis_handler import UserRepo, HandlerRepo, TableRepo, SharedStateRepo
+from symphony_ai.redis.redis_handler import RedisUser, HandlerRepo, TableRepo, SharedStateRepo
 
 # Initialize repositories with tenant context
-users = UserRepo(tenant="mimeia", ttl_default=3600)
+users = RedisUser(tenant="mimeia", ttl_default=3600)
 handlers = HandlerRepo(tenant="mimeia", ttl_default=1800)
 tables = TableRepo(tenant="mimeia")
 shared_state = SharedStateRepo(tenant="mimeia", user_id="user123")
@@ -53,9 +53,9 @@ step = await shared_state.get_field("conversation", "step")
 
 ## 📋 Repository Responsibilities
 
-### UserRepo - User Data Management
+### RedisUser - User Data Management
 ```python
-users = UserRepo(tenant="your_tenant")
+users = RedisUser(tenant="your_tenant")
 
 # CRUD operations
 await users.upsert("user_id", {"name": "Alice", "active": True})
@@ -239,7 +239,7 @@ await handler.set_table_data("products", "prod123", {"name": "Widget"})
 
 ### After (Focused Repositories)
 ```python
-users = UserRepo(tenant="mimeia", ttl_default=3600)
+users = RedisUser(tenant="mimeia", ttl_default=3600)
 handlers = HandlerRepo(tenant="mimeia", ttl_default=3600)
 tables = TableRepo(tenant="mimeia", ttl_default=3600)
 
@@ -269,7 +269,7 @@ The new architecture integrates seamlessly with the `GlobalSymphony` class from 
 
 ```python
 from symphony_ai.redis.redis_handler import (
-    UserRepo, HandlerRepo, TableRepo, SharedStateRepo, TriggerRepo, BatchRepo
+    RedisUser, HandlerRepo, TableRepo, SharedStateRepo, TriggerRepo, BatchRepo
 )
 from symphony_ai.symphony_concurrency.globals import GlobalSymphony
 from dataclasses import dataclass
@@ -279,7 +279,7 @@ import asyncio
 @dataclass 
 class RedisServices:
     """Complete Redis service layer with all repositories"""
-    users: UserRepo
+    users: RedisUser
     handlers: HandlerRepo
     tables: TableRepo
     triggers: TriggerRepo
@@ -292,7 +292,7 @@ class RedisServices:
     @classmethod
     def create(cls, tenant: str, ttl: int = 86400):
         return cls(
-            users=UserRepo(tenant=tenant, ttl_default=ttl),
+            users=RedisUser(tenant=tenant, ttl_default=ttl),
             handlers=HandlerRepo(tenant=tenant, ttl_default=ttl//2),  # Shorter TTL for handlers
             tables=TableRepo(tenant=tenant, ttl_default=ttl),
             triggers=TriggerRepo(tenant=tenant, ttl_default=ttl//24),  # 1 hour for triggers
@@ -355,6 +355,25 @@ def get_shared_state(request: Request) -> SharedStateRepo:
     redis_services = get_redis_services(request)
     user_id = get_user_id(request)
     return redis_services.shared_state(user_id)
+
+### 2.1 Per-request `SharedState` Context
+
+Bind the request specific state to a `ContextVar` so tools running in
+background threads see the right user:
+
+```python
+from symphony_ai.symphony_concurrency.redis import _current_ss, SharedStateRepo
+
+async def handle_message(request: Request, text: str):
+    ss = SharedStateRepo(tenant=request.state.redis.users.tenant,
+                         user_id=request.state.user_id)
+    token = _current_ss.set(ss)
+    try:
+        # call your synchronous agent/tool chain here
+        ...
+    finally:
+        _current_ss.reset(token)
+```
 
 # FastAPI endpoints with DI
 @app.post("/users")

@@ -503,7 +503,7 @@ pip install requests aiohttp pandas
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | **Infrastructure** | **`GlobalSymphony`** singleton → event-loop + 3 named `ThreadPoolExecutor`s + Redis client + CapacityLimiter                                                                                            | Keeps blocking Agency-Swarm work off the FastAPI loop while sharing one Redis pool per worker |
 | **Redis plumbing** | • `redis_client.py` (fork-safe pool)<br>• `redis/ops.py` (atomic helpers)<br>• `serde.py` (swap JSON↔MsgPack later)<br>• `key_factory.py` (names all keys)<br>• `tenant_cache.py` (TTL + helper mix-in) | Zero duplicated socket code; one place for key rules and (de)serialisation                    |
-| **Domain repos**   | `SharedStateRepo`, `UserRepo`, `HandlerRepo`, … (all subclass `TenantCache`)                                                                                                                            | Each repo ≤ 150 LOC, single responsibility, testable with `fakeredis`                         |
+| **Domain repos**   | `SharedStateRepo`, `RedisUser`, `HandlerRepo`, … (all subclass `TenantCache`)                                                                                                                            | Each repo ≤ 150 LOC, single responsibility, testable with `fakeredis`                         |
 | **Tool shim**      | `AsyncBaseTool` overrides `self._shared_state` to read a **ContextVar** (`_current_ss`)                                                                                                                 | Removes the unsafe global `BaseTool._shared_state = …` assignment race                        |
 | **FastAPI glue**   | In the request/web-socket handler:<br>`python<br>ss = SharedStateRepo(tenant=t_id, user_id=u_id)<br>tok = _current_ss.set(ss)<br>try: result = await call_agent()<br>finally: _current_ss.reset(tok)`   | Every in-flight coroutine—and its thread-pool jobs—sees the **correct** per-user SharedState  |
 
@@ -519,8 +519,7 @@ pip install symphony-concurrency  # your private wheel
 from contextlib import asynccontextmanager
 from symphony_concurrency.globals import GlobalSymphony, GlobalSymphonyConfig
 from symphony_concurrency.utils.logger import setup_logging
-from symphony_concurrency.redis.context import _current_ss
-from symphony_concurrency.redis.shared_state import SharedStateRepo
+from symphony_concurrency.redis import _current_ss, SharedStateRepo
 
 @asynccontextmanager
 async def lifespan(app):
@@ -558,13 +557,13 @@ class RememberStep(AsyncBaseTool):
 * **Global orchestration** (`globals.py`) finished; pools tuned for network I/O.
 * **Redis connectivity** fork-safe; pool caps @ 64 sockets per worker.
 * **Core utils**: Rich logger, BoundedExecutor, ContextVar wiring.
-* **Redis repos**: `SharedStateRepo`  (complete), `UserRepo`  (sketched), other repos stubs ready.
+* **Redis repos**: `SharedStateRepo`  (complete), `RedisUser`  (sketched), other repos stubs ready.
 * **Agency-Swarm bridge**: `AsyncBaseTool` property override done; Send-message streaming via Redis pub/sub queued for next sprint.
 
 ### Roadmap
 
 1. **Unit-tests** with `fakeredis.asyncio` (P0).
-2. Full `UserRepo`, `HandlerRepo`, `TableRepo` implementation (P1).
+2. Full `RedisUser`, `HandlerRepo`, `TableRepo` implementation (P1).
 3. Prometheus metrics for pool queue length + loop latency (P1).
 4. Optional Temporal workflow driver for CPU-heavy Tool chains (P2).
 

@@ -7,10 +7,10 @@ from .tenant_cache import TenantCache
 from ..ops import hset_with_expire, hincrby_with_expire, hdel
 from .serde import dumps
 
-logger = logging.getLogger("UserRepo")
+logger = logging.getLogger("RedisUser")
 
 
-class UserRepo(TenantCache):
+class RedisUser(TenantCache):
     """
     Repository for user-specific operations.
     

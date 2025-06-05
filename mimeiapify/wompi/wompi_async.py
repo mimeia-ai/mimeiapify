@@ -25,7 +25,8 @@ class WompiAsync:
         self.integrity_key = integrity_key
         self.environment = environment
         self.base_url = "https://checkout.wompi.co/p/"
-        self.api_url = f"https://{'sandbox.' if environment == 'sandbox' else ''}production.wompi.co/v1"
+        env_subdomain = "sandbox" if environment == "sandbox" else "production"
+        self.api_url = f"https://{env_subdomain}.wompi.co/v1"
         self._session = session
         self._own_session = False
     

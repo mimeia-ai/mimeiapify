@@ -1,4 +1,4 @@
-from symphony_ai.redis.redis_handler.serde import dumps, loads
+from mimeiapify.symphony_ai.redis.redis_handler.serde import dumps, loads
 from pydantic import BaseModel
 
 class User(BaseModel):

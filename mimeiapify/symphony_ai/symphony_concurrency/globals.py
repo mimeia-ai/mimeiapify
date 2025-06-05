@@ -45,7 +45,7 @@ class GlobalSymphony:
         limiter (anyio.CapacityLimiter): Concurrency limiter.
         redis (Optional[Redis]): Optional Redis connection.
     """
-    _instance: ClassVar["GlobalSymphony"] | None = None
+    _instance: ClassVar[Optional["GlobalSymphony"]] = None
 
     # ---- runtime attributes ----
     loop:            asyncio.AbstractEventLoop

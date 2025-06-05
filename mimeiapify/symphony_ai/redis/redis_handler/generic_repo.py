@@ -23,7 +23,7 @@ class GenericRepo(TenantCache):
     - get_ttl_generic() -> get_ttl() [inherited from TenantCache]
     
     Single Responsibility: Generic key-value operations with tenant context
-    Note: Prefer specific repositories (UserRepo, HandlerRepo, etc.) over this generic one
+    Note: Prefer specific repositories (RedisUser, HandlerRepo, etc.) over this generic one
     """
     
     def _key(self, key_base: str) -> str:

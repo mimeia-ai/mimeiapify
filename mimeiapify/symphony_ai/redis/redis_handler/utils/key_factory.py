@@ -8,7 +8,7 @@ logger = logging.getLogger("RedisKeyFactory")
 class KeyFactory(BaseModel):
     """Pure stateless helpers that know **nothing** about Redis calls."""
     user_prefix: str = Field(default="user")
-    handler_prefix: str = Field(default="handler")
+    handler_prefix: str = Field(default="state")
     table_prefix: str = Field(default="df")
     trigger_prefix: str = Field(default="exptrigger")
     batch_list_prefix: str = Field(default="batch")

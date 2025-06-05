@@ -36,27 +36,30 @@ from mimeiapify.symphony_ai.redis.redis_handler import (
     RedisUser, RedisStateHandler, RedisTable, RedisSharedState
 )
 
-# Initialize repositories with tenant context
-users = RedisUser(tenant="mimeia", ttl_default=3600)
-handlers = RedisStateHandler(tenant="mimeia", ttl_default=1800)
-tables = RedisTable(tenant="mimeia")
+# Initialize repositories with tenant and user context
+user = RedisUser(tenant="mimeia", user_id="user123", ttl_default=3600)
+handler = RedisStateHandler(tenant="mimeia", user_id="user123", ttl_default=1800)
+tables = RedisTable(tenant="mimeia")  # No user_id needed for tables
 shared_state = RedisSharedState(tenant="mimeia", user_id="user123")
 
-# User operations
-await users.upsert("user123", {"name": "Alice", "score": 100})
-user_data = await users.get("user123")
-await users.increment_field("user123", "score", 10)
+# User operations - cleaner API without user_id repetition
+await user.upsert({"name": "Alice", "score": 100})
+user_data = await user.get()
+await user.increment_field("score", 10)
 
-# Handler state management
-await handlers.set("chat_handler", "user123", {"step": 1, "context": "greeting"})
-state = await handlers.get("chat_handler", "user123")
-await handlers.upsert("chat_handler", "user123", {"step": 2})
+# Handler state management - cleaner API
+await handler.set("chat_handler", {"step": 1, "data": {...}})
+state = await handler.get("chat_handler")
+await handler.update_field("chat_handler", "step", 2)
 
-# Table operations
+# Merge operations (preserves existing state)
+final_state = await handler.upsert("chat_handler", {"step": 3})
+
+# Table operations - unchanged (no user context needed)
 await tables.set("users_table", "pk123", {"name": "Bob", "active": True})
 row = await tables.get("users_table", "pk123")
 
-# Shared state for tools/agents
+# Shared state for tools/agents - unchanged
 await shared_state.set("conversation", {"step": 1, "context": "greeting"})
 step = await shared_state.get_field("conversation", "step")
 ```
@@ -109,34 +112,37 @@ class SomeSyncTool:
 
 ### RedisUser - User Data Management
 ```python
-users = RedisUser(tenant="your_tenant")
+user = RedisUser(tenant="your_tenant", user_id="user123")
 
-# CRUD operations
-await users.upsert("user_id", {"name": "Alice", "active": True})
-user = await users.get("user_id")
-await users.update_field("user_id", "last_login", datetime.now())
-await users.delete("user_id")
+# CRUD operations - no need to repeat user_id
+await user.upsert({"name": "Alice", "active": True})
+user_data = await user.get()
+await user.update_field("last_login", datetime.now())
+await user.delete()
 
 # Atomic operations
-await users.increment_field("user_id", "login_count")
-await users.append_to_list("user_id", "tags", "premium")
+await user.increment_field("login_count")
+await user.append_to_list("tags", "premium")
 
-# Search
-user = await users.find_by_field("email", "alice@example.com")
-exists = await users.exists("user_id")
+# Search (still requires pattern matching across users)
+pattern_user = RedisUser(tenant="your_tenant", user_id="*")
+found_user = await pattern_user.find_by_field("email", "alice@example.com")
+
+# Check existence
+exists = await user.exists()
 ```
 
 ### RedisStateHandler - Conversational State
 ```python
-handlers = RedisStateHandler(tenant="your_tenant")
+handler = RedisStateHandler(tenant="your_tenant", user_id="user123")
 
-# State management
-await handlers.set("chat_handler", "user_id", {"step": 1, "data": {...}})
-state = await handlers.get("chat_handler", "user_id")
-await handlers.update_field("chat_handler", "user_id", "step", 2)
+# State management - cleaner API without user_id repetition
+await handler.set("chat_handler", {"step": 1, "data": {...}})
+state = await handler.get("chat_handler")
+await handler.update_field("chat_handler", "step", 2)
 
 # Merge operations (preserves existing state)
-final_state = await handlers.upsert("chat_handler", "user_id", {"step": 3})
+final_state = await handler.upsert("chat_handler", {"step": 3})
 ```
 
 ### RedisTable - Generic Data Tables

@@ -76,7 +76,7 @@ def setup_logging(
     lvl = lvl if lvl in ("DEBUG", "INFO", "WARNING", "ERROR") else "INFO"
 
     # defaults
-    console_fmt = console_fmt or "[%(levelname)s] %(name)s • %(message)s"
+    console_fmt = console_fmt or "[%(levelname)s] [%(name)s] • %(message)s"
     file_fmt = file_fmt or "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 
     # 1) Rich console handler

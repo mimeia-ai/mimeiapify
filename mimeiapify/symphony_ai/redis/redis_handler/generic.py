@@ -3,14 +3,14 @@ from typing import Any, Optional
 from pydantic import BaseModel
 import logging
 
-from .tenant_cache import TenantCache
+from .utils.tenant_cache import TenantCache
 from ..ops import get, set
-from .serde import dumps, loads
+from .utils.serde import dumps, loads
 
-logger = logging.getLogger("GenericRepo")
+logger = logging.getLogger("RedisGeneric")
 
 
-class GenericRepo(TenantCache):
+class RedisGeneric(TenantCache):
     """
     Repository for generic operations.
     

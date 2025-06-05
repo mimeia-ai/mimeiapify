@@ -3,11 +3,11 @@ from typing import Any, Dict, Optional
 from pydantic import BaseModel
 import logging
 
-from .tenant_cache import TenantCache
+from .utils.tenant_cache import TenantCache
 from ..ops import hset_with_expire, hincrby_with_expire, hdel
-from .serde import dumps
+from .utils.serde import dumps
 
-logger = logging.getLogger("RedisUser")
+logger = logging.getLogger("User")
 
 
 class RedisUser(TenantCache):

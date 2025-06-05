@@ -3,14 +3,14 @@ from typing import Any, Dict, Optional
 from pydantic import BaseModel
 import logging
 
-from .tenant_cache import TenantCache
+from .utils.tenant_cache import TenantCache
 from ..ops import hset_with_expire, hincrby_with_expire
-from .serde import dumps
+from .utils.serde import dumps
 
-logger = logging.getLogger("TableRepo")
+logger = logging.getLogger("RedisTable")
 
 
-class TableRepo(TenantCache):
+class RedisTable(TenantCache):
     """
     Repository for table data management (generic DataFrames/rows).
     

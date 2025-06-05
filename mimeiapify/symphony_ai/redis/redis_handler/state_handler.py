@@ -4,14 +4,14 @@ from datetime import datetime
 from pydantic import BaseModel
 import logging
 
-from .tenant_cache import TenantCache
-from ..ops import hset_with_expire, hincrby_with_expire, hget, hset
-from .serde import dumps
+from .utils.tenant_cache import TenantCache
+from ..ops import hset_with_expire, hincrby_with_expire, hget, hset, hdel
+from .utils.serde import dumps
 
-logger = logging.getLogger("HandlerRepo")
+logger = logging.getLogger("RedisStateHandler")
 
 
-class HandlerRepo(TenantCache):
+class RedisStateHandler(TenantCache):
     """
     Repository for handler state management.
     

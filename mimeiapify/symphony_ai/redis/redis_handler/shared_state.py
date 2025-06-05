@@ -3,14 +3,14 @@ from typing import Any, Dict, Optional, Mapping
 from pydantic import BaseModel, Field
 import logging
 
-from .tenant_cache import TenantCache
-from ..ops import hset_with_expire, hgetall, hget, hdel, delete
-from .serde import dumps, loads, dumps_hash, loads_hash
+from .utils.tenant_cache import TenantCache
+from ..ops import hset_with_expire, hgetall, hget, hdel, delete, scan_keys
+from .utils.serde import dumps, loads
 
-logger = logging.getLogger("SharedStateRepo")
+logger = logging.getLogger("RedisSharedState")
 
 
-class SharedStateRepo(TenantCache):
+class RedisSharedState(TenantCache):
     """
     Repository for shared state management between tools and agents.
     
@@ -21,7 +21,7 @@ class SharedStateRepo(TenantCache):
     single-responsibility implementation that reuses our refactored components.
     
     Example usage:
-        shared_state = SharedStateRepo(tenant="mimeia", user_id="user123")
+        shared_state = SharedState(tenant="mimeia", user_id="user123")
         await shared_state.set("conversation", {"step": 1, "context": {...}})
         step = await shared_state.get_field("conversation", "step")
     """
@@ -137,7 +137,6 @@ class SharedStateRepo(TenantCache):
         state_names = []
         
         try:
-            from ..ops import scan_keys
             while True:
                 next_cursor, keys_batch = await scan_keys(
                     match_pattern=pattern, cursor=cursor, count=100

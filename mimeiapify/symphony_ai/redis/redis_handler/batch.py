@@ -2,15 +2,15 @@ from __future__ import annotations
 from typing import Any, List, Set
 import logging
 
-from .tenant_cache import TenantCache
-from .key_factory import KeyFactory
+from .utils.tenant_cache import TenantCache
+from .utils.key_factory import KeyFactory
 from ..ops import rpush_and_sadd, lrange, ltrim, llen, smembers, srem
-from .serde import dumps, loads
+from .utils.serde import dumps, loads
 
-logger = logging.getLogger("BatchRepo")
+logger = logging.getLogger("RedisBatch")
 
 
-class BatchRepo(TenantCache):
+class RedisBatch(TenantCache):
     """
     Repository for batch processing operations.
     

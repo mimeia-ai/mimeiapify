@@ -2,14 +2,14 @@ from __future__ import annotations
 from datetime import datetime
 import logging
 
-from .tenant_cache import TenantCache
+from .utils.tenant_cache import TenantCache
 from ..ops import setex
-from .serde import dumps
+from .utils.serde import dumps
 
-logger = logging.getLogger("TriggerRepo")
+logger = logging.getLogger("RedisTrigger")
 
 
-class TriggerRepo(TenantCache):
+class RedisTrigger(TenantCache):
     """
     Repository for expiration trigger key management.
     

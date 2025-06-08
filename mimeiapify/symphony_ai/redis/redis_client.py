@@ -25,90 +25,103 @@ log = logging.getLogger("symphony.redis")
 
 class RedisClient:
     """
-    Fork-safe, asyncio-native Redis client manager.
+    Fork-safe, asyncio-native **multi-pool** Redis manager.
 
-    Ensures one connection pool per OS process. Handles safe setup, teardown, and access.
-
-    Class Attributes:
-        _instance (Optional[Redis]): The Redis client instance for this process.
-        _pool (Optional[ConnectionPool]): The Redis connection pool.
-        _pid (Optional[int]): The process ID for which the pool is valid.
+    You can register any number of pools, each indexed by an *alias*
+    (string) or by the full connection URL. Every worker process keeps its
+    own pools to avoid post-fork descriptor reuse.
     """
-    _instance: ClassVar[Optional[Redis]] = None
-    _pool: ClassVar[Optional[ConnectionPool]] = None
+
+    _pools: ClassVar[dict[str, ConnectionPool]] = {}
+    _clients: ClassVar[dict[str, Redis]] = {}
     _pid: ClassVar[Optional[int]] = None
 
     # ---------- life-cycle --------------------------------------------------
 
     @classmethod
-    def setup(cls, url: str, max_connections: int = 64) -> None:
+    def setup(
+        cls,
+        url: str,
+        *,
+        alias: str | None = None,
+        max_connections: int = 64,
+    ) -> None:
         """
-        Set up the Redis connection pool for the current process.
-        Safe to call multiple times in the same PID (no-op if already set up).
+        Register (or re-use) a Redis connection pool for this process.
 
-        Args:
-            url (str): Redis connection URL.
+        If ``alias`` is omitted the URL itself is used as key.  For backward
+        compatibility the first pool created without an explicit alias is also
+        registered under ``"default"``.
         """
         pid = os.getpid()
-        if cls._pid == pid and cls._instance:
-            log.debug("Redis already initialised in PID %s", pid)
+        if cls._pid is None:
+            cls._pid = pid
+        elif cls._pid != pid:
+            # process forked – discard inherited pools
+            cls._pools.clear()
+            cls._clients.clear()
+            cls._pid = pid
+
+        key = alias or url
+        if key in cls._pools:
             return
 
-        log.info("Initialising Redis in PID %s for %s", pid, url)
-        cls._pool = ConnectionPool.from_url(
+        log.info("Initialising Redis pool '%s' in PID %s (%s)", key, pid, url)
+        pool = ConnectionPool.from_url(
             url,
             decode_responses=True,
             encoding="utf-8",
-            max_connections=max_connections   # tweak as needed
+            max_connections=max_connections,
         )
-        cls._instance = Redis(connection_pool=cls._pool)
-        cls._pid = pid
-        log.debug("Redis connection pool created for PID %s", pid)
+        client = Redis(connection_pool=pool)
+        cls._pools[key] = pool
+        cls._clients[key] = client
+        if alias is None and "default" not in cls._pools:
+            cls._pools["default"] = pool
+            cls._clients["default"] = client
 
     @classmethod
-    async def close(cls) -> None:
-        """
-        Close the Redis connection pool for the current process.
-        """
+    async def close(cls, alias: str | None = None) -> None:
+        """Close one or all Redis pools for this process."""
         pid = os.getpid()
-        if cls._pid != pid or cls._pool is None:
+        if cls._pid != pid:
             log.debug("No Redis pool to close for PID %s", pid)
             return
-        log.info("Closing Redis pool in PID %s", pid)
-        await cls._pool.disconnect()
-        cls._instance = cls._pool = cls._pid = None
-        log.debug("Redis pool closed for PID %s", pid)
+
+        keys = [alias] if alias else list(cls._pools.keys())
+        for k in keys:
+            pool = cls._pools.pop(k, None)
+            if pool:
+                log.info("Closing Redis pool '%s' in PID %s", k, pid)
+                await pool.disconnect()
+                cls._clients.pop(k, None)
+        if not cls._pools:
+            cls._pid = None
 
     # ---------- access helpers ---------------------------------------------
 
     @classmethod
-    async def get(cls) -> Redis:
-        """
-        Get the Redis client for the current process.
-        Performs a cheap health check (PING).
-
-        Returns:
-            Redis: The Redis client instance.
-        Raises:
-            RuntimeError: If setup() was not called in this process.
-        """
-        if cls._instance is None or cls._pid != os.getpid():
+    async def get(cls, alias: str | None = None) -> Redis:
+        """Return the Redis client for the given alias (default ``"default"``)."""
+        key = alias or "default"
+        client = cls._clients.get(key)
+        if client is None or cls._pid != os.getpid():
             log.error("RedisClient.get() called before setup() in this process.")
             raise RuntimeError(
-                "RedisClient.setup() must be called in this process first."
+                f"RedisClient.setup() must be called for alias '{key}' first."
             )
         # quick health check – keep it cheap
         try:
-            await cls._instance.ping()
-            log.debug("Redis PING successful.")
+            await client.ping()
+            log.debug("Redis PING successful for '%s'.", key)
         except Exception as exc:
-            log.error("Redis ping failed: %s", exc, exc_info=True)
+            log.error("Redis ping failed for '%s': %s", key, exc, exc_info=True)
             raise
-        return cls._instance
+        return client
 
     @classmethod
     @asynccontextmanager
-    async def connection(cls) -> AsyncIterator[Redis]:
+    async def connection(cls, alias: str | None = None) -> AsyncIterator[Redis]:
         """
         Async context manager for Redis connection.
 
@@ -117,7 +130,7 @@ class RedisClient:
             async with RedisClient.connection() as r:
                 await r.set("key", "value")
         """
-        client = await cls.get()
+        client = await cls.get(alias)
         try:
             yield client
         finally:
@@ -134,18 +147,19 @@ Re-using the parent's TCP sockets after a `fork()` (common with Gunicorn / Uvico
 from symphony_concurrency.redis_client import RedisClient
 
 # FastAPI lifespan
-RedisClient.setup("redis://localhost:6379/0")
+RedisClient.setup("redis://localhost:6379/0")  # registers alias "default"
 
 async with RedisClient.connection() as r:
     await r.publish("events", "hello")
 ```
 
 setup(url) – call once in every worker process. Safe re-entry.
+setup(url, alias="cache") – additional pools.
 
-get() – returns the redis.asyncio.Redis instance; performs a cheap
+get(alias="default") – returns the redis.asyncio.Redis instance; performs a cheap
 PING health-check.
 
-connection() – async context-manager wrapper.
+connection(alias=None) – async context-manager wrapper.
 
 close() – optional explicit pool shutdown during graceful
 termination.

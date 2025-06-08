@@ -20,6 +20,7 @@ class RedisTrigger(TenantCache):
     
     Single Responsibility: Expiration trigger management only
     """
+    redis_alias: str = "expiry"
     
     def _key(self, action: str, identifier: str) -> str:
         """Build trigger key using KeyFactory"""
@@ -42,7 +43,8 @@ class RedisTrigger(TenantCache):
         serialized_value = dumps(value)
 
         logger.debug(f"Setting trigger '{key}' with TTL {ttl_seconds}s")
-        return await setex(key, ttl_seconds, serialized_value)
+        # Note: Using setex directly as trigger keys are simple key-value pairs, not hashes
+        return await setex(key, ttl_seconds, serialized_value, alias=self.redis_alias)
 
     async def delete(self, action: str, identifier: str) -> int:
         """Delete specific trigger key (was delete_action_trigger)"""

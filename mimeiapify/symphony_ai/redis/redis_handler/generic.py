@@ -25,6 +25,7 @@ class RedisGeneric(TenantCache):
     Single Responsibility: Generic key-value operations with tenant context
     Note: Prefer specific repositories (RedisUser, HandlerRepo, etc.) over this generic one
     """
+    redis_alias: str = "default"
     
     def _key(self, key_base: str) -> str:
         """Build tenant-scoped key"""
@@ -40,14 +41,16 @@ class RedisGeneric(TenantCache):
             model: Optional BaseModel class for typed deserialization
         """
         full_key = self._key(key_base)
-        raw_value = await get(full_key)
+        # Note: Using direct ops.get() as this is simple key-value, not hash operations
+        raw_value = await get(full_key, alias=self.redis_alias)
         return loads(raw_value, model=model)
 
     async def set(self, key_base: str, value: Any, ex: Optional[int] = None) -> bool:
-        """Generic set with serialization (was set_generic)"""
+        """Generic set with serialization (Redis SET operation - replaces entire value)"""
         full_key = self._key(key_base)
         serialized_value = dumps(value)
-        return await set(full_key, serialized_value, ex=ex)
+        # Note: Using direct ops.set() as this is simple key-value, not hash operations
+        return await set(full_key, serialized_value, ex=ex, alias=self.redis_alias)
 
     async def delete(self, key_base: str) -> int:
         """Generic delete (was delete_generic)"""

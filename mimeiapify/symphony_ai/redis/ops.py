@@ -3,7 +3,7 @@
 from typing import Optional, Dict, List, Set, Union, Tuple, Sequence, Mapping, Any
 import logging
 
-from .redis_client import RedisClient
+from .redis_client import RedisClient, PoolAlias
 
 logger = logging.getLogger("RedisCoreMethods") # Use __name__ for standard logging practice
 
@@ -11,7 +11,7 @@ logger = logging.getLogger("RedisCoreMethods") # Use __name__ for standard loggi
 # =========================================================================
 # SECTION: Basic Key-Value Operations
 # =========================================================================
-async def set(key: str, value: str, ex: Optional[int] = None) -> bool:
+async def set(key: str, value: str, ex: Optional[int] = None, *, alias: PoolAlias = "default") -> bool:
     """
     Sets the string value of a key, with optional expiration.
 
@@ -19,11 +19,12 @@ async def set(key: str, value: str, ex: Optional[int] = None) -> bool:
         key: The full Redis key.
         value: The string value to store.
         ex: Optional expiration time in seconds.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         True if the operation was successful, False otherwise.
     """
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             # Ensure value is a type redis-py can handle directly (str, bytes, int, float)
             # Assuming decode_responses=True, strings are preferred.
@@ -36,7 +37,7 @@ async def set(key: str, value: str, ex: Optional[int] = None) -> bool:
             logger.error(f"Redis SET error for key '{key}': {e}", exc_info=True)
             return False
 
-async def setex(key: str, seconds: int, value: str) -> bool:
+async def setex(key: str, seconds: int, value: str, *, alias: PoolAlias = "default") -> bool:
     """
     Set key to hold string value and set key to timeout after given number of seconds.
 
@@ -44,11 +45,12 @@ async def setex(key: str, seconds: int, value: str) -> bool:
         key: The full Redis key.
         seconds: Expiration time in seconds.
         value: The string value to store.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         True if the operation was successful, False otherwise.
     """
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             if not isinstance(value, (str, bytes, int, float)):
                     logger.warning(f"RedisCoreMethods.setex received non-primitive type for key '{key}'. Attempting str conversion. Type: {type(value)}")
@@ -58,37 +60,39 @@ async def setex(key: str, seconds: int, value: str) -> bool:
             logger.error(f"Redis SETEX error for key '{key}': {e}", exc_info=True)
             return False
 
-async def exists(*keys: str) -> int:
+async def exists(*keys: str, alias: PoolAlias = "default") -> int:
     """
     Returns the number of keys that exist from the list of keys.
 
     Args:
         *keys: One or more full Redis keys.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         Integer reply: The number of keys that exist.
     """
     if not keys:
         return 0
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             return await redis.exists(*keys)
         except Exception as e:
             logger.error(f"Redis EXISTS error for keys starting with '{keys[0]}...': {e}", exc_info=True)
             return 0 # Return 0 on error
 
-async def get(key: str) -> Optional[str]:
+async def get(key: str, *, alias: PoolAlias = "default") -> Optional[str]:
     """
     Retrieve the string value of a key.
 
     Args:
         key: The full Redis key.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         The string value if the key exists, otherwise None.
         Returns None on error.
     """
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             # Assumes decode_responses=True in RedisClient config
             return await redis.get(key)
@@ -96,19 +100,20 @@ async def get(key: str) -> Optional[str]:
             logger.error(f"Redis GET error for key '{key}': {e}", exc_info=True)
             return None
 
-async def delete(*keys: str) -> int:
+async def delete(*keys: str, alias: PoolAlias = "default") -> int:
     """
     Delete one or more keys.
 
     Args:
         *keys: One or more full Redis keys to delete.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         The number of keys deleted. Returns 0 on error.
     """
     if not keys:
             return 0
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             return await redis.delete(*keys)
         except Exception as e:
@@ -118,7 +123,7 @@ async def delete(*keys: str) -> int:
     # =========================================================================
 # SECTION: Atomic Combined Operations (Using Pipelines internally)
 # =========================================================================
-async def hset_with_expire(key: str, mapping: Mapping[str, str], ttl: int) -> Tuple[Optional[int], bool]:
+async def hset_with_expire(key: str, mapping: Mapping[str, str], ttl: int, *, alias: PoolAlias = "default") -> Tuple[Optional[int], bool]:
     """
     Atomically sets hash fields using HSET and sets key expiration using EXPIRE.
 
@@ -126,6 +131,7 @@ async def hset_with_expire(key: str, mapping: Mapping[str, str], ttl: int) -> Tu
         key: The full Redis key of the hash.
         mapping: A dictionary of field-value pairs (str:str).
         ttl: Time To Live in seconds.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         A tuple: (result_of_hset, result_of_expire).
@@ -137,14 +143,14 @@ async def hset_with_expire(key: str, mapping: Mapping[str, str], ttl: int) -> Tu
             logger.warning(f"hset_with_expire called with empty mapping for key '{key}'. Skipping HSET, attempting EXPIRE.")
             try:
                 # Still attempt expire if key might exist
-                expire_success = await expire(key, ttl)
+                expire_success = await expire(key, ttl, alias=alias)
                 return 0, expire_success # HSET result is 0 as nothing was set
             except Exception as e:
                 logger.error(f"Error attempting EXPIRE in hset_with_expire for key '{key}' with empty mapping: {e}", exc_info=True)
                 return None, False
 
 
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             async with redis.pipeline(transaction=True) as pipe:
                 # Ensure mapping values are suitable primitive types
@@ -166,7 +172,7 @@ async def hset_with_expire(key: str, mapping: Mapping[str, str], ttl: int) -> Tu
             logger.error(f"Redis HSET+EXPIRE pipeline error for key '{key}': {e}", exc_info=True)
             return None, False # Indicate pipeline execution failure
 
-async def hincrby_with_expire(key: str, field: str, increment: int, ttl: int) -> Tuple[Optional[int], bool]:
+async def hincrby_with_expire(key: str, field: str, increment: int, ttl: int, *, alias: PoolAlias = "default") -> Tuple[Optional[int], bool]:
     """
     Atomically increments a hash field using HINCRBY and sets key expiration using EXPIRE.
 
@@ -175,6 +181,7 @@ async def hincrby_with_expire(key: str, field: str, increment: int, ttl: int) ->
         field: The field name.
         increment: The amount to increment by.
         ttl: Time To Live in seconds.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         A tuple: (new_value, result_of_expire).
@@ -182,7 +189,7 @@ async def hincrby_with_expire(key: str, field: str, increment: int, ttl: int) ->
         - result_of_expire: Boolean indicating if EXPIRE was successful, or False on pipeline error.
         Returns (None, False) on general exception.
     """
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             async with redis.pipeline(transaction=True) as pipe:
                 pipe.hincrby(key, field, increment)
@@ -199,7 +206,7 @@ async def hincrby_with_expire(key: str, field: str, increment: int, ttl: int) ->
             logger.error(f"Redis HINCRBY+EXPIRE pipeline error for key '{key}', field '{field}': {e}", exc_info=True)
             return None, False # Indicate pipeline execution failure
 
-async def rpush_and_sadd(list_key: str, list_values: Sequence[str], set_key: str, set_members: Sequence[str]) -> Tuple[Optional[int], Optional[int]]:
+async def rpush_and_sadd(list_key: str, list_values: Sequence[str], set_key: str, set_members: Sequence[str], *, alias: PoolAlias = "default") -> Tuple[Optional[int], Optional[int]]:
     """
     Atomically pushes values to a list using RPUSH and adds members to a set using SADD.
 
@@ -208,6 +215,7 @@ async def rpush_and_sadd(list_key: str, list_values: Sequence[str], set_key: str
         list_values: Sequence of string values to push to the list.
         set_key: The full Redis key for the set.
         set_members: Sequence of string members to add to the set.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         A tuple: (result_of_rpush, result_of_sadd).
@@ -220,7 +228,7 @@ async def rpush_and_sadd(list_key: str, list_values: Sequence[str], set_key: str
         # Decide desired behavior: maybe still run the non-empty part? For now, return failure.
         return None, None # Indicate nothing was done due to empty input
 
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             # Ensure values/members are primitive types
             checked_list_values = []
@@ -256,7 +264,7 @@ async def rpush_and_sadd(list_key: str, list_values: Sequence[str], set_key: str
 # SECTION: Scan Operations
 # =========================================================================
 
-async def scan_keys(match_pattern: str, cursor: Union[str, bytes, int] = 0, count: Optional[int] = None) -> Tuple[Union[str, int], List[str]]:
+async def scan_keys(match_pattern: str, cursor: Union[str, bytes, int] = 0, count: Optional[int] = None, *, alias: PoolAlias = "default") -> Tuple[Union[str, int], List[str]]:
     """
     Iterates the key space using the SCAN command.
 
@@ -265,6 +273,7 @@ async def scan_keys(match_pattern: str, cursor: Union[str, bytes, int] = 0, coun
         cursor: The cursor to start iteration from (0 for the first call).
                 Can be int or string representation of int. Bytes cursor is also possible if decode_responses=False.
         count: Hint for the number of keys to return per iteration.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         A tuple containing:
@@ -277,7 +286,7 @@ async def scan_keys(match_pattern: str, cursor: Union[str, bytes, int] = 0, coun
     # Let's try to stick to int/str representation for broader compatibility
     current_cursor: Union[str, int] = cursor if isinstance(cursor, (str, int)) else str(int(cursor)) # Prefer string '0' if bytes 'b0' is passed. Assume int 0 is start.
 
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             # redis-py's scan returns (new_cursor, keys_list)
             # new_cursor type might be int or bytes depending on version/config
@@ -301,19 +310,20 @@ async def scan_keys(match_pattern: str, cursor: Union[str, bytes, int] = 0, coun
 # =========================================================================
 # SECTION: TTL Management
 # =========================================================================
-async def get_ttl(key: str) -> int:
+async def get_ttl(key: str, *, alias: PoolAlias = "default") -> int:
     """
     Get remaining Time To Live (TTL) for a key in seconds.
 
     Args:
         key: The full Redis key.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
             - TTL in seconds
             - -1 if the key exists but has no associated expire time
             - -2 if the key does not exist or an error occurred.
     """
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             return await redis.ttl(key)
         except Exception as e:
@@ -321,18 +331,19 @@ async def get_ttl(key: str) -> int:
             return -2 # Consistent with redis-py for errors/non-existent key
 
 
-async def expire(key: str, ttl: int) -> bool:
+async def expire(key: str, ttl: int, *, alias: PoolAlias = "default") -> bool:
     """
     Set a timeout on key in seconds.
 
     Args:
         key: The full Redis key.
         ttl: Time To Live in seconds.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         True if the timeout was set, False if key does not exist or timeout could not be set (or on error).
     """
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             # EXPIRE returns 1 if timeout was set, 0 if key doesn't exist or timeout wasn't set
             result = await redis.expire(key, ttl)
@@ -344,7 +355,7 @@ async def expire(key: str, ttl: int) -> bool:
 # =========================================================================
 # SECTION: Hash Operations
 # =========================================================================
-async def hset(key: str, field: Optional[str] = None, value: Optional[str] = None, mapping: Optional[Mapping[str, str]] = None) -> int:
+async def hset(key: str, field: Optional[str] = None, value: Optional[str] = None, mapping: Optional[Mapping[str, str]] = None, *, alias: PoolAlias = "default") -> int:
     """
     Sets field in the hash stored at key to value.
     If mapping is provided, sets multiple fields and values.
@@ -354,6 +365,7 @@ async def hset(key: str, field: Optional[str] = None, value: Optional[str] = Non
         field: The field name (required if mapping is None).
         value: The string value for the field (required if mapping is None).
         mapping: A dictionary of field-value pairs (must be str:str).
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         Integer reply: The number of fields that were added.
@@ -366,7 +378,7 @@ async def hset(key: str, field: Optional[str] = None, value: Optional[str] = Non
             logger.warning(f"HSET called with both ('field', 'value') and 'mapping' for key '{key}'. Using 'mapping'.")
             # Prioritize mapping if both are provided, clear field/value
 
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             # redis-py's hset handles both single field/value and mapping
             if mapping:
@@ -396,18 +408,19 @@ async def hset(key: str, field: Optional[str] = None, value: Optional[str] = Non
             return -1 # Indicate error
 
 
-async def hget(key: str, field: str) -> Optional[str]:
+async def hget(key: str, field: str, *, alias: PoolAlias = "default") -> Optional[str]:
     """
     Gets the string value of a hash field.
 
     Args:
         key: The full Redis key of the hash.
         field: The field name.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         The string value of the field, or None if the field or key doesn't exist, or on error.
     """
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             # Assumes decode_responses=True
             return await redis.hget(key, field)
@@ -416,18 +429,19 @@ async def hget(key: str, field: str) -> Optional[str]:
             return None
 
 
-async def hgetall(key: str) -> Dict[str, str]:
+async def hgetall(key: str, *, alias: PoolAlias = "default") -> Dict[str, str]:
     """
     Gets all fields and values stored in a hash.
 
     Args:
         key: The full Redis key of the hash.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         A dictionary mapping field names to string values. Returns an empty dict
         if the key doesn't exist or on error.
     """
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             # Assumes decode_responses=True, returns Dict[str, str]
             return await redis.hgetall(key)
@@ -436,18 +450,19 @@ async def hgetall(key: str) -> Dict[str, str]:
             return {}
 
 
-async def hexists(key: str, field: str) -> bool:
+async def hexists(key: str, field: str, *, alias: PoolAlias = "default") -> bool:
     """
     Checks if a field exists in a hash.
 
     Args:
         key: The full Redis key of the hash.
         field: The field name.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         True if the field exists, False otherwise (including key not existing or error).
     """
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             return await redis.hexists(key, field)
         except Exception as e:
@@ -455,20 +470,21 @@ async def hexists(key: str, field: str) -> bool:
             return False
 
 
-async def hdel(key: str, *fields: str) -> int:
+async def hdel(key: str, *fields: str, alias: PoolAlias = "default") -> int:
     """
     Deletes one or more hash fields.
 
     Args:
         key: The full Redis key of the hash.
         *fields: One or more field names to delete.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         The number of fields that were removed from the hash (0 if the key doesn't exist or on error).
     """
     if not fields:
         return 0
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             return await redis.hdel(key, *fields)
         except Exception as e:
@@ -476,7 +492,7 @@ async def hdel(key: str, *fields: str) -> int:
             return 0
 
 
-async def hincrby(key: str, field: str, increment: int = 1) -> Optional[int]:
+async def hincrby(key: str, field: str, increment: int = 1, *, alias: PoolAlias = "default") -> Optional[int]:
     """
     Atomically increments the integer value of a hash field by the given amount.
     Sets the field to `increment` if the field does not exist.
@@ -485,13 +501,14 @@ async def hincrby(key: str, field: str, increment: int = 1) -> Optional[int]:
         key: The full Redis key of the hash.
         field: The field name.
         increment: The amount to increment by (default: 1).
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         The new integer value of the field after the increment.
         Returns None if the key exists but the field contains a value of the wrong type,
         or if an error occurs.
     """
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             result = await redis.hincrby(key, field, increment)
             # HINCRBY returns the new value as an integer
@@ -503,21 +520,22 @@ async def hincrby(key: str, field: str, increment: int = 1) -> Optional[int]:
 # =========================================================================
 # SECTION: List Operations
 # =========================================================================
-async def rpush(key: str, *values: str) -> int:
+async def rpush(key: str, *values: str, alias: PoolAlias = "default") -> int:
     """
     Pushes one or more string values onto the right end of a list.
 
     Args:
         key: The full Redis key for the list.
         *values: One or more string values to push.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         The length of the list after the push operation, or 0 on error.
     """
     if not values:
-        return await llen(key) # RPUSH with no values is a no-op, return current length
+        return await llen(key, alias=alias) # RPUSH with no values is a no-op, return current length
 
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
                 # Ensure values are primitive types suitable for redis-py
                 checked_values = []
@@ -533,7 +551,7 @@ async def rpush(key: str, *values: str) -> int:
             return 0
 
 
-async def lpop(key: str, count: Optional[int] = None) -> Optional[Union[str, List[str]]]:
+async def lpop(key: str, count: Optional[int] = None, *, alias: PoolAlias = "default") -> Optional[Union[str, List[str]]]:
     """
     Removes and returns elements from the left end of a list.
 
@@ -541,12 +559,13 @@ async def lpop(key: str, count: Optional[int] = None) -> Optional[Union[str, Lis
         key: The full Redis key for the list.
         count: The number of elements to pop. If None (default), pops one element.
                 If count > 0, pops up to 'count' elements (Redis >= 6.2).
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         A single string, a list of strings, or None if the list is empty or an error occurs.
         (Assumes decode_responses=True).
     """
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             # aioredis-py handles the 'count' argument.
             # Assumes decode_responses=True returns str or List[str].
@@ -557,7 +576,7 @@ async def lpop(key: str, count: Optional[int] = None) -> Optional[Union[str, Lis
             return None
 
 
-async def lrange(key: str, start: int, end: int) -> List[str]:
+async def lrange(key: str, start: int, end: int, *, alias: PoolAlias = "default") -> List[str]:
     """
     Gets a range of elements from a list.
 
@@ -565,12 +584,13 @@ async def lrange(key: str, start: int, end: int) -> List[str]:
         key: The full Redis key for the list.
         start: Start index (0-based).
         end: End index (inclusive, -1 for last element).
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         A list of string elements (assumes decode_responses=True),
         or an empty list if key doesn't exist or on error.
     """
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             # Assumes decode_responses=True returns List[str]
             return await redis.lrange(key, start, end)
@@ -579,7 +599,7 @@ async def lrange(key: str, start: int, end: int) -> List[str]:
             return []
 
 
-async def ltrim(key: str, start: int, end: int) -> bool:
+async def ltrim(key: str, start: int, end: int, *, alias: PoolAlias = "default") -> bool:
     """
     Trims a list so that it will contain only the specified range of elements.
 
@@ -587,11 +607,12 @@ async def ltrim(key: str, start: int, end: int) -> bool:
         key: The full Redis key for the list.
         start: Start index (0-based).
         end: End index (inclusive, -1 for last element).
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         True if the operation was successful, False otherwise.
     """
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             return await redis.ltrim(key, start, end)
         except Exception as e:
@@ -599,17 +620,18 @@ async def ltrim(key: str, start: int, end: int) -> bool:
             return False
 
 
-async def llen(key: str) -> int:
+async def llen(key: str, *, alias: PoolAlias = "default") -> int:
     """
     Gets the length of a list.
 
     Args:
         key: The full Redis key for the list.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         The length of the list, or 0 if the key doesn't exist or on error.
     """
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             return await redis.llen(key)
         except Exception as e:
@@ -619,13 +641,14 @@ async def llen(key: str) -> int:
 # =========================================================================
 # SECTION: Set Operations
 # =========================================================================
-async def sadd(key: str, *members: str) -> int:
+async def sadd(key: str, *members: str, alias: PoolAlias = "default") -> int:
     """
     Adds one or more members to a set.
 
     Args:
         key: The full key name for the set.
         *members: One or more string members to add.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         The number of members that were added to the set (not including members already present),
@@ -634,7 +657,7 @@ async def sadd(key: str, *members: str) -> int:
     if not members:
             return 0 # SADD with no members is a no-op
 
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             # Ensure members are primitive types suitable for redis-py
             checked_members = []
@@ -650,18 +673,19 @@ async def sadd(key: str, *members: str) -> int:
             return 0
 
 
-async def smembers(key: str) -> Set[str]:
+async def smembers(key: str, *, alias: PoolAlias = "default") -> Set[str]:
     """
     Gets all members of a set.
 
     Args:
         key: The full key name for the set.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         A set of string members (assumes decode_responses=True),
         or an empty set if the key doesn't exist or on error.
     """
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             # Assumes decode_responses=True returns Set[str]
             return await redis.smembers(key)
@@ -670,13 +694,14 @@ async def smembers(key: str) -> Set[str]:
             return set()
 
 
-async def srem(key: str, *members: str) -> int:
+async def srem(key: str, *members: str, alias: PoolAlias = "default") -> int:
     """
     Removes one or more members from a set.
 
     Args:
         key: The full key name for the set.
         *members: One or more string members to remove.
+        alias: Redis pool alias to use (default: "default").
 
     Returns:
         The number of members that were removed from the set, or 0 on error.
@@ -684,7 +709,7 @@ async def srem(key: str, *members: str) -> int:
     if not members:
         return 0 # SREM with no members is a no-op
 
-    async with RedisClient.connection() as redis:
+    async with RedisClient.connection(alias=alias) as redis:
         try:
             # Ensure members are primitive types suitable for redis-py
             checked_members = []
@@ -708,9 +733,16 @@ from symphony_concurrency.redis import ops as r
 await r.set("foo", "bar", ex=60)
 val = await r.get("foo")
 await r.hset_with_expire("profile:42", {"name": "alice"}, ttl=3600)
+
+# Use different Redis pools/databases via alias
+await r.set("key", "value", alias="expiry")  # expiry pool
+await r.hget("hash", "field", alias="pubsub")  # pubsub pool
 ```
-Each call grabs a connection from RedisClient.connection() – the pool is
-reused, so there’s no socket churn.
+Each call grabs a connection from RedisClient.connection(alias) – the pool is
+reused, so there's no socket churn.
+
+All functions accept an optional `alias` parameter (default: "default") to target
+specific Redis pools configured via GlobalSymphonyConfig.
 
 Values are automatically coerced to str for safety.
 
@@ -719,7 +751,7 @@ emit a Rich-style log entry via logger = logging.getLogger("RedisOps").
 
 If you need more exotic commands, import the raw client:
 ```python
-redis = await RedisClient.get()
+redis = await RedisClient.get("handlers")  # specific pool
 await redis.zadd("scores", {"bob": 123})
 ```
 """

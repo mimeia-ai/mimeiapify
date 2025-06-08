@@ -4,8 +4,8 @@ from pydantic import BaseModel
 import logging
 
 from .utils.tenant_cache import TenantCache
-from ..ops import hset_with_expire, hincrby_with_expire
-from .utils.serde import dumps
+from ..ops import hincrby_with_expire, hget
+from .utils.serde import dumps, loads
 
 logger = logging.getLogger("RedisTable")
 
@@ -15,8 +15,9 @@ class RedisTable(TenantCache):
     Repository for table data management (generic DataFrames/rows).
     
     Extracted from RedisHandler SECTION: Table Data Management:
-    - set_table_data() -> set()
+    - set_table_data() -> upsert()
     - get_table_data() -> get()
+    - get_field() -> get_field()
     - increment_table_data_field() -> increment_field()
     - append_to_table_data_list_field() -> append_to_list()
     - table_data_exists() -> exists()
@@ -27,6 +28,7 @@ class RedisTable(TenantCache):
     
     Single Responsibility: Table/DataFrame data management only
     """
+    redis_alias: str = "handlers"
     
     def _key(self, table_name: str, pkid: str) -> str:
         """Build table key using KeyFactory"""
@@ -49,25 +51,21 @@ class RedisTable(TenantCache):
             logger.debug(f"Table data not found for '{table_name}:{pkid}'")
         return result
 
-    async def set(self, table_name: str, pkid: str, data: Dict[str, Any], ttl: Optional[int] = None) -> bool:
-        """Set table row data (was set_table_data)"""
+    async def upsert(self, table_name: str, pkid: str, data: Dict[str, Any], ttl: Optional[int] = None) -> bool:
+        """Set table row data (Redis HSET upsert behavior)"""
         key = self._key(table_name, pkid)
         return await self._hset_with_ttl(key, data, ttl)
 
-    async def update_field(self, table_name: str, pkid: str, field: str, value: Any, ttl: Optional[int] = None) -> bool:
-        """Update single field in table row (was create_or_update_table_field)"""
+    async def get_field(self, table_name: str, pkid: str, field: str) -> Optional[Any]:
+        """Get a specific field from table row data"""
         key = self._key(table_name, pkid)
-        serialized_value = dumps(value)
-        
-        hset_res, expire_res = await hset_with_expire(
-            key=key,
-            mapping={field: serialized_value},
-            ttl=ttl or self.ttl_default
-        )
-        success = hset_res is not None and expire_res
-        if not success:
-            logger.warning(f"Failed to update table field '{field}' for '{table_name}:{pkid}'")
-        return success
+        raw_value = await hget(key, field, alias=self.redis_alias)
+        return loads(raw_value) if raw_value is not None else None
+
+    async def update_field(self, table_name: str, pkid: str, field: str, value: Any, ttl: Optional[int] = None) -> bool:
+        """Update single field in table row"""
+        key = self._key(table_name, pkid)
+        return await self._hset_with_ttl(key, {field: value}, ttl)
 
     async def increment_field(self, table_name: str, pkid: str, field: str, increment: int = 1, ttl: Optional[int] = None) -> Optional[int]:
         """Atomically increment integer field (was increment_table_data_field)"""
@@ -77,7 +75,8 @@ class RedisTable(TenantCache):
             key=key,
             field=field,
             increment=increment,
-            ttl=ttl or self.ttl_default
+            ttl=ttl or self.ttl_default,
+            alias=self.redis_alias
         )
         
         if new_value is not None and expire_res:

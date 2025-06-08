@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 import logging
 
 from .utils.tenant_cache import TenantCache
-from ..ops import hset_with_expire, hgetall, hget, hdel, delete, scan_keys
+from ..ops import hget, hdel, scan_keys
 from .utils.serde import dumps, loads
 
 logger = logging.getLogger("RedisSharedState")
@@ -26,15 +26,16 @@ class RedisSharedState(TenantCache):
         step = await shared_state.get_field("conversation", "step")
     """
     user_id: str = Field(..., min_length=1)
+    redis_alias: str = "symphony_shared_state"
 
     def _key(self, state_name: str) -> str:
         """Build shared state key using KeyFactory"""
         return self.keys.shared_state(self.tenant, state_name, self.user_id)
 
     # ---- Public API for shared state management -------------------------
-    async def set(self, state_name: str, data: Mapping[str, Any]) -> bool:
+    async def upsert(self, state_name: str, data: Mapping[str, Any]) -> bool:
         """
-        Store the entire hash for a given state name.
+        Store the entire hash for a given state name (Redis HSET upsert behavior).
         Overwrites existing data and renews TTL.
         
         Args:
@@ -69,10 +70,10 @@ class RedisSharedState(TenantCache):
             Field value or None if not found
         """
         key = self._key(state_name)
-        raw_value = await hget(key, field)
+        raw_value = await hget(key, field, alias=self.redis_alias)
         return loads(raw_value) if raw_value is not None else None
 
-    async def set_field(self, state_name: str, field: str, value: Any, ttl: Optional[int] = None) -> bool:
+    async def update_field(self, state_name: str, field: str, value: Any, ttl: Optional[int] = None) -> bool:
         """
         Update a single field in the state hash and renew TTL.
         
@@ -83,17 +84,7 @@ class RedisSharedState(TenantCache):
             ttl: Optional TTL override
         """
         key = self._key(state_name)
-        serialized_value = dumps(value)
-        
-        hset_res, expire_res = await hset_with_expire(
-            key=key,
-            mapping={field: serialized_value},
-            ttl=ttl or self.ttl_default
-        )
-        success = hset_res is not None and expire_res
-        if not success:
-            logger.warning(f"Failed to set field '{field}' in state '{state_name}' for user '{self.user_id}'")
-        return success
+        return await self._hset_with_ttl(key, {field: value}, ttl)
 
     async def delete_field(self, state_name: str, field: str) -> int:
         """
@@ -106,8 +97,9 @@ class RedisSharedState(TenantCache):
         Returns:
             Number of fields deleted (0 or 1)
         """
+        # Note: hdel doesn't have an inherited equivalent, so direct ops call is appropriate
         key = self._key(state_name)
-        return await hdel(key, field)
+        return await hdel(key, field, alias=self.redis_alias)
 
     async def delete(self, state_name: str) -> int:
         """
@@ -120,7 +112,7 @@ class RedisSharedState(TenantCache):
             Number of keys deleted (0 or 1)
         """
         key = self._key(state_name)
-        return await delete(key)
+        return await self.delete_key(key)
 
     async def exists(self, state_name: str) -> bool:
         """Check if state exists"""
@@ -139,7 +131,7 @@ class RedisSharedState(TenantCache):
         try:
             while True:
                 next_cursor, keys_batch = await scan_keys(
-                    match_pattern=pattern, cursor=cursor, count=100
+                    match_pattern=pattern, cursor=cursor, count=100, alias=self.redis_alias
                 )
                 
                 for full_key in keys_batch:

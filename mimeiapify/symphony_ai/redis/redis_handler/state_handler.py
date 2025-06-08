@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 import logging
 
 from .utils.tenant_cache import TenantCache
-from ..ops import hset_with_expire, hincrby_with_expire, hget, hset, hdel
+from ..ops import hincrby_with_expire, hget, hset
 from .utils.serde import dumps
 
 logger = logging.getLogger("RedisStateHandler")
@@ -16,7 +16,7 @@ class RedisStateHandler(TenantCache):
     Repository for handler state management.
     
     Extracted from RedisHandler SECTION: Handler State Management:
-    - set_handler_state() -> set()
+    - set_handler_state() -> upsert()
     - get_handler_state() -> get()
     - get_handler_state_field() -> get_field()
     - update_handler_state_field() -> update_field()
@@ -24,16 +24,17 @@ class RedisStateHandler(TenantCache):
     - append_to_handler_state_list_field() -> append_to_list()
     - handler_exists() -> exists()
     - delete_handler_state() -> delete()
-    - create_or_update_handler() -> upsert()
+    - create_or_update_handler() -> merge()
     
     Single Responsibility: Handler state management only
     
     Example usage:
         handler = RedisStateHandler(tenant="mimeia", user_id="user123")
-        await handler.set("chat_handler", {"step": 1, "context": "greeting"})
+        await handler.upsert("chat_handler", {"step": 1, "context": "greeting"})
         state = await handler.get("chat_handler")
     """
     user_id: str = Field(..., min_length=1)
+    redis_alias: str = "handlers"
     
     def _key(self, handler_name: str) -> str:
         """Build handler key using KeyFactory"""
@@ -55,35 +56,27 @@ class RedisStateHandler(TenantCache):
             logger.debug(f"Handler state not found for '{handler_name}' (user: '{self.user_id}')")
         return result
 
-    async def set(self, handler_name: str, state_data: Dict[str, Any], ttl: Optional[int] = None) -> bool:
-        """Set handler state, overwriting existing (was set_handler_state)"""
+    async def upsert(self, handler_name: str, state_data: Dict[str, Any], ttl: Optional[int] = None) -> bool:
+        """Set handler state, overwriting existing (Redis HSET upsert behavior)"""
         key = self._key(handler_name)
         return await self._hset_with_ttl(key, state_data, ttl)
 
     async def get_field(self, handler_name: str, field: str) -> Optional[Any]:
         """Get specific field from handler state (was get_handler_state_field)"""
         key = self._key(handler_name)
-        return await hget(key, field)
+        return await hget(key, field, alias=self.redis_alias)
 
     async def update_field(self, handler_name: str, field: str, value: Any, ttl: Optional[int] = None) -> bool:
-        """Update single field in handler state (was update_handler_state_field)"""
+        """Update single field in handler state"""
         key = self._key(handler_name)
-        serialized_value = dumps(value)
         
         if ttl:
-            # Use atomic version with TTL renewal
-            hset_res, expire_res = await hset_with_expire(
-                key=key,
-                mapping={field: serialized_value},
-                ttl=ttl
-            )
-            success = hset_res is not None and expire_res
-            if not success:
-                logger.warning(f"Failed to update handler field '{field}' for '{handler_name}' (user: '{self.user_id}')")
-            return success
+            # Use inherited method with TTL renewal
+            return await self._hset_with_ttl(key, {field: value}, ttl)
         else:
             # Use simple hset without TTL renewal
-            result = await hset(key, field=field, value=serialized_value)
+            serialized_value = dumps(value)
+            result = await hset(key, field=field, value=serialized_value, alias=self.redis_alias)
             return result >= 0
 
     async def increment_field(self, handler_name: str, field: str, increment: int = 1, ttl: Optional[int] = None) -> Optional[int]:
@@ -94,7 +87,8 @@ class RedisStateHandler(TenantCache):
             key=key,
             field=field,
             increment=increment,
-            ttl=ttl or self.ttl_default
+            ttl=ttl or self.ttl_default,
+            alias=self.redis_alias
         )
         
         if new_value is not None and expire_res:
@@ -118,7 +112,7 @@ class RedisStateHandler(TenantCache):
         key = self._key(handler_name)
         return await self.delete_key(key)
 
-    async def upsert(self, handler_name: str, state_data: Dict[str, Any], ttl: Optional[int] = None, models: Optional[Dict[str, type[BaseModel]]] = None) -> Optional[Dict[str, Any]]:
+    async def merge(self, handler_name: str, state_data: Dict[str, Any], ttl: Optional[int] = None, models: Optional[Dict[str, type[BaseModel]]] = None) -> Optional[Dict[str, Any]]:
         """
         Merge new data with existing state and save (was create_or_update_handler)
         Returns the final merged state or None on failure
@@ -143,7 +137,7 @@ class RedisStateHandler(TenantCache):
         }
         
         # Save merged state
-        success = await self.set(handler_name, new_state, ttl)
+        success = await self.upsert(handler_name, new_state, ttl)
         
         if success:
             logger.debug(f"Successfully upserted handler '{handler_name}' for user '{self.user_id}'")

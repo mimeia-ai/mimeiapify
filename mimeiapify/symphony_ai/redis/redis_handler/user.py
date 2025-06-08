@@ -4,8 +4,8 @@ from pydantic import BaseModel, Field
 import logging
 
 from .utils.tenant_cache import TenantCache
-from ..ops import hset_with_expire, hincrby_with_expire, hdel
-from .utils.serde import dumps
+from ..ops import hincrby_with_expire, hdel, hget
+from .utils.serde import dumps, loads
 
 logger = logging.getLogger("User")
 
@@ -16,6 +16,7 @@ class RedisUser(TenantCache):
     
     Extracted from RedisHandler SECTION: User-specific Methods:
     - get_user_data() -> get()
+    - get_field() -> get_field()
     - update_user_field() -> update_field()  
     - increment_user_field() -> increment_field()
     - append_to_user_list_field() -> append_to_list()
@@ -31,8 +32,10 @@ class RedisUser(TenantCache):
         user = RedisUser(tenant="mimeia", user_id="user123")
         await user.upsert({"name": "Alice", "score": 100})
         data = await user.get()
+        name = await user.get_field("name")
     """
     user_id: str = Field(..., min_length=1)
+    redis_alias: str = "user"
     
     def _key(self) -> str:
         """Build user key using KeyFactory"""
@@ -54,24 +57,14 @@ class RedisUser(TenantCache):
         return result
 
     async def upsert(self, data: Dict[str, Any], ttl: Optional[int] = None) -> bool:
-        """Create or update user record (was create_user_record)"""
+        """Create or update user record with multiple fields (Redis HSET upsert behavior)"""
         key = self._key()
         return await self._hset_with_ttl(key, data, ttl)
 
     async def update_field(self, field: str, value: Any, ttl: Optional[int] = None) -> bool:
-        """Update single field in user hash (was update_user_field)"""
+        """Update single field in user hash"""
         key = self._key()
-        serialized_value = dumps(value)
-        
-        hset_res, expire_res = await hset_with_expire(
-            key=key,
-            mapping={field: serialized_value},
-            ttl=ttl or self.ttl_default
-        )
-        success = hset_res is not None and expire_res
-        if not success:
-            logger.warning(f"Failed to update user field '{field}' for user_id '{self.user_id}'")
-        return success
+        return await self._hset_with_ttl(key, {field: value}, ttl)
 
     async def increment_field(self, field: str, increment: int = 1, ttl: Optional[int] = None) -> Optional[int]:
         """Atomically increment integer field (was increment_user_field)"""
@@ -81,7 +74,8 @@ class RedisUser(TenantCache):
             key=key,
             field=field, 
             increment=increment,
-            ttl=ttl or self.ttl_default
+            ttl=ttl or self.ttl_default,
+            alias=self.redis_alias
         )
         
         if new_value is not None and expire_res:
@@ -115,9 +109,15 @@ class RedisUser(TenantCache):
     async def delete_field(self, field: str) -> int:
         """Delete specific field from user hash (was delete_user_hash_field)"""
         key = self._key()
-        return await hdel(key, field)
+        return await hdel(key, field, alias=self.redis_alias)
 
     async def exists(self) -> bool:
         """Check if user exists (was user_exists)"""
         key = self._key()
-        return await self.key_exists(key) 
+        return await self.key_exists(key)
+
+    async def get_field(self, field: str) -> Optional[Any]:
+        """Get a specific field from the user's data"""
+        key = self._key()
+        raw_value = await hget(key, field, alias=self.redis_alias)
+        return loads(raw_value) if raw_value is not None else None 

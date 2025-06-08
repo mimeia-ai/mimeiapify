@@ -24,6 +24,7 @@ class RedisBatch(TenantCache):
     
     Single Responsibility: Batch queue management and tenant tracking
     """
+    redis_alias: str = "handlers"
     
     def _list_key(self, service: str, entity_key: str, action: str) -> str:
         """Build batch list key using KeyFactory"""
@@ -53,7 +54,8 @@ class RedisBatch(TenantCache):
             list_key=list_key,
             list_values=[serialized_data],
             set_key=global_set_key,
-            set_members=[tenant_member]
+            set_members=[tenant_member],
+            alias=self.redis_alias
         )
         
         if rpush_res is None or sadd_res is None:
@@ -68,7 +70,7 @@ class RedisBatch(TenantCache):
         list_key = self._list_key(service, entity_key, action)
         logger.debug(f"Getting batch chunk ({start}-{end}) from '{list_key}'")
         
-        raw_items = await lrange(list_key, start, end)
+        raw_items = await lrange(list_key, start, end, alias=self.redis_alias)
         if not raw_items:
             return []
         
@@ -87,12 +89,12 @@ class RedisBatch(TenantCache):
         """Trim batch list to specified range (was trim_batch_list)"""
         list_key = self._list_key(service, entity_key, action)
         logger.debug(f"Trimming batch list '{list_key}' to keep range ({start}-{end})")
-        return await ltrim(list_key, start, end)
+        return await ltrim(list_key, start, end, alias=self.redis_alias)
 
     async def get_length(self, service: str, entity_key: str, action: str) -> int:
         """Get current length of batch list (was get_batch_list_length)"""
         list_key = self._list_key(service, entity_key, action)
-        return await llen(list_key)
+        return await llen(list_key, alias=self.redis_alias)
 
     # ---- Global operations (work across all tenants) ------------------------
     @classmethod
@@ -105,7 +107,7 @@ class RedisBatch(TenantCache):
         key_factory = KeyFactory()
         global_set_key = key_factory.pending_set(service)
         logger.debug(f"[Global] Getting pending tenants from set '{global_set_key}'")
-        return await smembers(global_set_key)
+        return await smembers(global_set_key, alias="handlers")
 
     @classmethod
     async def remove_from_pending(cls, service: str, tenant_prefix: str) -> int:
@@ -117,4 +119,4 @@ class RedisBatch(TenantCache):
         key_factory = KeyFactory()
         global_set_key = key_factory.pending_set(service)
         logger.debug(f"[Global] Removing tenant '{tenant_prefix}' from pending set '{global_set_key}'")
-        return await srem(global_set_key, tenant_prefix) 
+        return await srem(global_set_key, tenant_prefix, alias="handlers") 

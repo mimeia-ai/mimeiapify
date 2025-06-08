@@ -1,6 +1,7 @@
 from __future__ import annotations
 from pydantic import BaseModel, Field
 import logging
+from typing import Optional
 
 logger = logging.getLogger("RedisKeyFactory")
 
@@ -10,7 +11,7 @@ class KeyFactory(BaseModel):
     user_prefix: str = Field(default="user")
     handler_prefix: str = Field(default="state")
     table_prefix: str = Field(default="df")
-    trigger_prefix: str = Field(default="exptrigger")
+    trigger_prefix: str = Field(default="EXPTRIGGER")  # Uppercase for consistency with listener
     batch_list_prefix: str = Field(default="batch")
     pending_set_prefix: str = Field(default="pending_batches")
     shared_state_prefix: str = Field(default="SS")
@@ -42,3 +43,34 @@ class KeyFactory(BaseModel):
 
     def pending_set(self, svc: str) -> str:
         return f"{self.pending_set_prefix}:{svc}"
+
+    # ---- parsers -----------------------------------------------------------
+    def parse_trigger(self, key: str) -> Optional[tuple[str, str, str]]:
+        """
+        Parse a trigger key back into its components.
+        
+        Args:
+            key: Redis key like "tenant:EXPTRIGGER:action:identifier"
+            
+        Returns:
+            (tenant, action, identifier) or None if not a trigger key
+        """
+        if f":{self.trigger_prefix}:" not in key:
+            return None
+            
+        try:
+            parts = key.split(":", 3)  # Split into max 4 parts: tenant, EXPTRIGGER, action, identifier
+            if len(parts) != 4 or parts[1] != self.trigger_prefix:
+                return None
+            tenant, _, action, identifier = parts
+            return tenant, action, identifier
+        except (ValueError, IndexError):
+            return None
+
+    def is_trigger_key(self, key: str) -> bool:
+        """Check if a key is a trigger key."""
+        return f":{self.trigger_prefix}:" in key
+
+
+# Default instance for global use
+default_key_factory = KeyFactory()

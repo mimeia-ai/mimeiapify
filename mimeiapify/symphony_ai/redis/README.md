@@ -1,3 +1,4 @@
+# mimieapify/symphony_ai/redis/README.md
 # Redis Module - Clean Architecture
 
 This module provides Redis operations with clean separation of concerns, following SOLID principles. The Redis Handler package has been refactored from a monolithic 754-line God class into focused, single-responsibility repositories.

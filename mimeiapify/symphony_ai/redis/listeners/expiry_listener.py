@@ -92,7 +92,7 @@ async def run_listener(
                 
                 # Build the prefix for registry lookup
                 prefix = f"{keys.trigger_prefix}:{action}:"
-                handler = expiration_registry._handlers.get(prefix)
+                handler = expiration_registry.handlers.get(prefix)
                 if not handler:
                     logger.debug("No handler registered for prefix '%s'", prefix)
                     continue

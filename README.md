@@ -1,4 +1,4 @@
-# Mimeiapify (Version 1.4.0, 2025-06-09)
+# Mimeiapify (Version 1.4.1, 2025-06-09)
 
 Mimeiapify is a Python library designed to host several API integrations and utility functions. It currently bundles an Airtable client, a full Wompi payment wrapper and a new **symphony_ai** module which provides concurrency utilities and Redis-backed state management for [Agency-Swarm](https://github.com/VRSEN/agency-swarm) agents. More integrations are planned for future releases.
 

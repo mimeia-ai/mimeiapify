@@ -534,6 +534,43 @@ async def api_key_middleware(request: Request, call_next):
 | **Error resilience** | Graceful degradation if Redis is unavailable |
 | **Performance optimized** | Only writes when data actually changes |
 
+### FastAPI Lifespan Integration
+
+```python
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from mimeiapify.symphony_ai.symphony_concurrency.globals import GlobalSymphony, GlobalSymphonyConfig
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Proper startup and shutdown lifecycle management."""
+    # Startup
+    config = GlobalSymphonyConfig(
+        redis_url="redis://localhost:6379",
+        workers_tool=64,
+        workers_agent=16,
+        redis_enable_key_events=True
+    )
+    await GlobalSymphony.create(config)
+    print("🚀 GlobalSymphony initialized")
+    
+    yield  # Application runs here
+    
+    # Shutdown
+    await GlobalSymphony.shutdown()
+    print("🛑 GlobalSymphony shutdown complete")
+
+app = FastAPI(lifespan=lifespan)
+
+# Your endpoints here...
+@app.post("/agent/chat")
+async def chat_endpoint(message: str, request: Request):
+    # GlobalSymphony is available throughout app lifecycle
+    agency = build_agency_with_threads(tenant, user_id)
+    response = await agency.get_response(message)
+    return {"message": response}
+```
+
 ---
 
 ## 6️⃣  Frequently-asked questions

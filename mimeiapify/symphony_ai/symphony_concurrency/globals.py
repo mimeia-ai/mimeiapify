@@ -193,6 +193,56 @@ class GlobalSymphony:
             raise RuntimeError("GlobalSymphony.create() not called yet")
         return cls._instance
 
+    @classmethod
+    async def shutdown(cls) -> None:
+        """
+        Gracefully shutdown the GlobalSymphony singleton and clean up all resources.
+
+        This method should be called during application shutdown (e.g., FastAPI lifespan)
+        to properly close thread pools, Redis connections, and reset the singleton state.
+
+        Example:
+            ```python
+            # In FastAPI lifespan
+            @asynccontextmanager
+            async def lifespan(app: FastAPI):
+                # Startup
+                await GlobalSymphony.create(config)
+                yield
+                # Shutdown
+                await GlobalSymphony.shutdown()
+            ```
+        """
+        if cls._instance is None:
+            log.debug("GlobalSymphony.shutdown() called but no instance exists.")
+            return
+
+        instance = cls._instance
+        log.info("Shutting down GlobalSymphony...")
+
+        # Shutdown thread pools gracefully
+        try:
+            log.debug("Shutting down thread pools...")
+            instance.pool_user.shutdown(wait=True)
+            instance.pool_tool.shutdown(wait=True) 
+            instance.pool_agent.shutdown(wait=True)
+            log.debug("Thread pools shut down successfully.")
+        except Exception as exc:
+            log.error("Error shutting down thread pools: %s", exc)
+
+        # Close Redis connections
+        try:
+            log.debug("Closing Redis connections...")
+            # Close all Redis clients managed by RedisClient
+            await RedisClient.close()
+            log.debug("Redis connections closed successfully.")
+        except Exception as exc:
+            log.error("Error closing Redis connections: %s", exc)
+
+        # Reset singleton instance
+        cls._instance = None
+        log.info("GlobalSymphony shutdown completed.")
+
 
 """
 # GlobalSymphony 📯
@@ -231,13 +281,18 @@ async def startup_with_explicit_pools():
     )
     await GlobalSymphony.create(cfg)
 
+# Proper shutdown for resource cleanup
+async def shutdown():
+    await GlobalSymphony.shutdown()
+
 sym = GlobalSymphony.get()            # anywhere in your code
 sym.pool_tool.submit(do_io_blocking)  # reuse shared pool
 ```
 
 Call GlobalSymphony.create() once per worker process (e.g. in
 FastAPI lifespan). All subsequent GlobalSymphony.get() calls return the
-same instance.
+same instance. Always call GlobalSymphony.shutdown() during application
+shutdown to properly close thread pools and Redis connections.
 
 **Redis Configuration:**
 - `redis_url` as a string: Creates 4 pools automatically (default/15, handlers/10, expiry/9, pubsub/8)

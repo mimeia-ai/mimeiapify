@@ -2,9 +2,10 @@
 Symphony AI Concurrency Tools
 =============================
 
-Async-friendly tool base classes for Agency-Swarm integration.
+Async-friendly tool base classes and utilities for Agency-Swarm integration.
 """
 
 from .async_tool import AsyncBaseTool
+from .user_threads import UserThreads
 
-__all__ = ["AsyncBaseTool"] 
+__all__ = ["AsyncBaseTool", "UserThreads"] 

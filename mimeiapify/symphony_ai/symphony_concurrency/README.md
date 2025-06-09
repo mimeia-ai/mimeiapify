@@ -230,6 +230,8 @@ class ComplexTool(AsyncBaseTool):
 
 ## 5️⃣  FastAPI Middleware Integration
 
+### HTTP Middleware for Shared State
+
 ```python
 from fastapi import FastAPI, Request
 from mimeiapify.symphony_ai.redis.context import _current_ss
@@ -237,13 +239,42 @@ from mimeiapify.symphony_ai.redis.redis_handler.shared_state import RedisSharedS
 
 app = FastAPI()
 
-@app.middleware("http")
-async def bind_shared_state(request: Request, call_next):
-    # Extract tenant/user from request (headers, JWT, etc.)
+def parse_tenant_user(request: Request) -> tuple[str, str]:
+    """
+    Extract tenant and user_id from request.
+    
+    Customize this function based on your authentication strategy:
+    - JWT tokens in Authorization header
+    - Custom headers (X-Tenant-ID, X-User-ID)
+    - URL path parameters
+    - Query parameters
+    """
+    # Option 1: Custom headers
     tenant = request.headers.get("X-Tenant-ID", "default")
     user_id = request.headers.get("X-User-ID", "anonymous")
     
-    # Create scoped shared state
+    # Option 2: From JWT token (example)
+    # auth_header = request.headers.get("Authorization", "")
+    # if auth_header.startswith("Bearer "):
+    #     token = auth_header[7:]
+    #     payload = decode_jwt(token)
+    #     tenant = payload.get("tenant", "default")
+    #     user_id = payload.get("user_id", "anonymous")
+    
+    # Option 3: From path parameters
+    # tenant = request.path_params.get("tenant", "default")
+    # user_id = request.path_params.get("user_id", "anonymous")
+    
+    return tenant, user_id
+
+@app.middleware("http")
+async def bind_shared_state(request: Request, call_next):
+    """
+    Bind RedisSharedState to request context for all HTTP endpoints.
+    
+    This makes `self.ss` available in any AsyncBaseTool called during the request.
+    """
+    tenant, user_id = parse_tenant_user(request)
     ss = RedisSharedState(tenant=tenant, user_id=user_id)
     token = _current_ss.set(ss)
     
@@ -253,12 +284,255 @@ async def bind_shared_state(request: Request, call_next):
     finally:
         _current_ss.reset(token)
 
+# Example HTTP endpoint
 @app.post("/agent/chat")
-async def chat_endpoint(message: str):
-    # Any AsyncBaseTool called here will have access to the bound RedisSharedState
-    result = await some_agent.get_completion(message)
-    return {"response": result}
+async def chat_endpoint(message: str, request: Request):
+    """HTTP endpoint with automatic shared state binding."""
+    # Extract context (already bound by middleware)
+    tenant, user_id = parse_tenant_user(request)
+    
+    # Create agency with thread persistence
+    agency = build_agency_with_threads(tenant, user_id)
+    
+    # Any AsyncBaseTool called here has access to self.ss
+    response = await agency.get_response(message)
+    return {"message": response}
 ```
+
+### WebSocket Integration with UserThreads
+
+```python
+from fastapi import WebSocket, WebSocketDisconnect
+from mimeiapify.symphony_ai.symphony_concurrency.tools.user_threads import UserThreads
+from mimeiapify.symphony_ai.symphony_concurrency.globals import GlobalSymphony
+from agency_swarm import Agency
+
+@app.websocket("/ws/{tenant}/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, tenant: str, user_id: str):
+    """
+    WebSocket endpoint with both shared state and thread persistence.
+    
+    URL pattern: /ws/mimeia/user123
+    """
+    await websocket.accept()
+    
+    # Create shared state and user threads
+    ss = RedisSharedState(tenant=tenant, user_id=user_id)
+    ut = UserThreads(tenant=tenant, user_id=user_id)
+    
+    # Bind shared state to WebSocket context
+    token = _current_ss.set(ss)
+    
+    try:
+        while True:
+            # Receive message
+            data = await websocket.receive_json()
+            message = data.get("message", "")
+            
+            # Create agency with thread persistence
+            agency = Agency(
+                agents=[main_agent, ceo_agent, coder_agent],
+                threads_callbacks={
+                    "load": ut.sync_load_threads,
+                    "save": ut.sync_save_threads,
+                },
+                max_prompt_tokens=4000,
+                max_completion_tokens=4000,
+            )
+            
+            # Process message (runs in thread pool, has access to shared state)
+            sym = GlobalSymphony.get()
+            response = await asyncio.wrap_future(
+                sym.pool_user.submit(lambda: agency.get_completion(message))
+            )
+            
+            # Send response
+            await websocket.send_json({
+                "response": response,
+                "user_id": user_id,
+                "tenant": tenant
+            })
+            
+    except WebSocketDisconnect:
+        print(f"User {user_id} disconnected")
+    finally:
+        _current_ss.reset(token)
+
+# Alternative: WebSocket with message-based tenant/user extraction
+@app.websocket("/ws")
+async def websocket_endpoint_dynamic(websocket: WebSocket):
+    """
+    WebSocket endpoint where tenant/user_id come in each message.
+    
+    Message format: {"tenant": "mimeia", "user_id": "user123", "message": "Hello"}
+    """
+    await websocket.accept()
+    
+    try:
+        while True:
+            data = await websocket.receive_json()
+            tenant = data.get("tenant", "default")
+            user_id = data.get("user_id", "anonymous") 
+            message = data.get("message", "")
+            
+            # Create scoped state for this message
+            ss = RedisSharedState(tenant=tenant, user_id=user_id)
+            ut = UserThreads(tenant=tenant, user_id=user_id)
+            
+            token = _current_ss.set(ss)
+            try:
+                # Build agency with thread persistence
+                agency = build_agency_with_threads(tenant, user_id, ut)
+                
+                # Process message
+                sym = GlobalSymphony.get()
+                response = await asyncio.wrap_future(
+                    sym.pool_user.submit(lambda: agency.get_completion(message))
+                )
+                
+                await websocket.send_json({"response": response})
+                
+            finally:
+                _current_ss.reset(token)
+                
+    except WebSocketDisconnect:
+        print("WebSocket disconnected")
+```
+
+### Helper Functions
+
+```python
+def build_agency_with_threads(tenant: str, user_id: str, ut: UserThreads = None) -> Agency:
+    """
+    Factory function to create Agency with thread persistence.
+    
+    Parameters
+    ----------
+    tenant : str
+        Tenant identifier
+    user_id : str
+        User identifier  
+    ut : UserThreads, optional
+        UserThreads instance, creates new one if None
+        
+    Returns
+    -------
+    Agency
+        Configured agency with thread callbacks
+    """
+    if ut is None:
+        ut = UserThreads(tenant=tenant, user_id=user_id)
+    
+    return Agency(
+        agents=[main_agent, ceo_agent, coder_agent],
+        threads_callbacks={
+            "load": ut.sync_load_threads,
+            "save": ut.sync_save_threads,
+        },
+        max_prompt_tokens=4000,
+        max_completion_tokens=4000,
+    )
+
+async def reset_user_conversation(tenant: str, user_id: str) -> bool:
+    """
+    Utility to reset user's conversation state.
+    
+    Clears both thread persistence and shared state.
+    """
+    try:
+        ut = UserThreads(tenant=tenant, user_id=user_id)
+        ss = RedisSharedState(tenant=tenant, user_id=user_id)
+        
+        # Clear threads and shared state
+        await ut.delete_threads()
+        await ss.clear_all_states()
+        
+        return True
+    except Exception as e:
+        logger.error(f"Failed to reset conversation for {tenant}/{user_id}: {e}")
+        return False
+
+# Example endpoint to reset conversation
+@app.post("/users/{tenant}/{user_id}/reset")
+async def reset_conversation(tenant: str, user_id: str):
+    """Reset user's conversation history and shared state."""
+    success = await reset_user_conversation(tenant, user_id)
+    return {"success": success, "message": "Conversation reset" if success else "Reset failed"}
+```
+
+### Authentication Integration Examples
+
+```python
+# JWT-based authentication
+import jwt
+from fastapi import HTTPException, Depends
+from fastapi.security import HTTPBearer
+
+security = HTTPBearer()
+
+def parse_jwt_context(token: str = Depends(security)) -> tuple[str, str]:
+    """Extract tenant/user from JWT token."""
+    try:
+        payload = jwt.decode(token.credentials, SECRET_KEY, algorithms=["HS256"])
+        tenant = payload.get("tenant", "default")
+        user_id = payload.get("sub")  # standard JWT subject field
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+            
+        return tenant, user_id
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+@app.post("/agent/chat")
+async def authenticated_chat(
+    message: str, 
+    context: tuple[str, str] = Depends(parse_jwt_context)
+):
+    """Endpoint with JWT authentication."""
+    tenant, user_id = context
+    
+    # Shared state is automatically bound via middleware
+    agency = build_agency_with_threads(tenant, user_id)
+    response = await agency.get_response(message)
+    
+    return {"message": response}
+
+# API Key-based authentication  
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    """Extract tenant/user from API key."""
+    api_key = request.headers.get("X-API-Key")
+    if not api_key:
+        return JSONResponse({"error": "API key required"}, status_code=401)
+    
+    # Look up tenant/user from API key
+    tenant, user_id = await lookup_api_key(api_key)
+    if not tenant:
+        return JSONResponse({"error": "Invalid API key"}, status_code=401)
+    
+    # Bind shared state
+    ss = RedisSharedState(tenant=tenant, user_id=user_id)
+    token = _current_ss.set(ss)
+    
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        _current_ss.reset(token)
+```
+
+### Key Benefits of This Integration
+
+| Feature | Benefit |
+|---------|---------|
+| **Automatic context binding** | Every AsyncBaseTool has access to `self.ss` without manual setup |
+| **Thread persistence** | Conversations continue across requests/reconnections |
+| **Tenant isolation** | Complete data separation between organizations |
+| **WebSocket support** | Real-time chat with full state management |
+| **Flexible auth** | Works with JWT, API keys, headers, path params |
+| **Error resilience** | Graceful degradation if Redis is unavailable |
+| **Performance optimized** | Only writes when data actually changes |
 
 ---
 

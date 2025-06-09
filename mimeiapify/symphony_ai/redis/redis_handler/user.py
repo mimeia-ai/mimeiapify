@@ -7,7 +7,7 @@ from .utils.tenant_cache import TenantCache
 from ..ops import hincrby_with_expire, hdel, hget
 from .utils.serde import dumps, loads
 
-logger = logging.getLogger("User")
+logger = logging.getLogger("RedisUser")
 
 
 class RedisUser(TenantCache):

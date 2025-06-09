@@ -20,7 +20,7 @@ import logging
 
 from redis.asyncio import Redis, ConnectionPool
 
-log = logging.getLogger("symphony.redis")
+log = logging.getLogger("RedisClient")
 
 # Predefined Redis pool aliases with their database numbers
 PoolAlias = Literal["default", "handlers", "expiry", "pubsub", "symphony_shared_state", "user"]

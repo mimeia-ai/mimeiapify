@@ -32,6 +32,7 @@ import asyncio
 import logging
 from typing import Any, Awaitable
 from agency_swarm.tools import BaseTool
+from pydantic import ConfigDict
 
 from mimeiapify.symphony_ai.symphony_concurrency.globals import GlobalSymphony
 from mimeiapify.symphony_ai.redis.context import _current_ss
@@ -56,6 +57,13 @@ class AsyncBaseTool(BaseTool):
     3. Blocks the worker thread until the coroutine completes.
     """
 
+    # ------------------------------------------------------------------
+    # 🛠  Pydantic config — allow BaseTool to attach `name`, `description`, …
+    model_config = ConfigDict(
+        extra="allow",               # <- key line: let BaseTool set dynamic attributes
+        arbitrary_types_allowed=True
+    )
+
     # --------------------------- public API -----------------------------
 
     def run(self, *args: Any, **kwargs: Any) -> Any:  # noqa: D401, PLR0911
@@ -75,7 +83,9 @@ class AsyncBaseTool(BaseTool):
         try:
             return future.result()        # blocks this worker thread only
         except Exception as exc:          # pragma: no cover
-            logger.exception("Tool %s raised: %s", self.name, exc)
+            # Defensive logging that won't fail if name attribute is missing
+            tool_name = getattr(self, "name", self.__class__.__name__)
+            logger.exception("Tool %s raised: %s", tool_name, exc)
             raise
 
     # ------------------------ subclass contract ------------------------

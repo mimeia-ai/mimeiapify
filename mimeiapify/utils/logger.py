@@ -1,27 +1,28 @@
 """
-utils.logger
+mimeiapify.utils.logger
 
 Opinionated Rich-based logger for colour-rich, flexible logging in Python projects.
 
-Provides a setup_logging() function to configure console and file logging with rich formatting.
+`setup_logging()` configures console and optional file logging. Call it once when
+your application starts.
 
-Usage:
-    from mimeiapify.utils.logger import setup_logging
-    setup_logging(level="DEBUG", mode="DEV", log_dir="./logs")
+Example
+-------
+```python
+from mimeiapify.utils.logger import setup_logging
 
-Call once at application start-up (FastAPI lifespan or if __name__ == "__main__":).
+# console only
+setup_logging(level="DEBUG")
 
-Usage
------
-from symphony_concurrency.utils.logger import setup_logging
-
+# console + daily file
 setup_logging(
     level="INFO",
     mode="DEV",
     log_dir="./logs",
-    console_fmt="[%(levelname)s] %(name)s • %(message)s",
-    file_fmt="%(asctime)s — %(levelname)s — %(name)s — %(message)s",
+    console_fmt="[%(levelname)s] [%(name)s] %(message)s",
 )
+```
+Pass custom ``console_fmt`` or ``file_fmt`` to add request IDs, tenant info, etc.
 """
 
 from __future__ import annotations
@@ -119,7 +120,7 @@ def setup_logging(
 Opinionated Rich-based logger.
 
 ```python
-from symphony_concurrency.utils.logger import setup_logging
+from mimeiapify.utils.logger import setup_logging
 
 # console only
 setup_logging(level="DEBUG")

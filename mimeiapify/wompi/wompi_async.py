@@ -11,17 +11,19 @@ class WompiAsync:
     This class provides methods to generate payment links and interact with Wompi's API.
     """
     
-    def __init__(self, public_key: str, integrity_key: str, environment: str = "production", session: Optional[aiohttp.ClientSession] = None):
+    def __init__(self, public_key: str, private_key: str, integrity_key: str, environment: str = "production", session: Optional[aiohttp.ClientSession] = None):
         """
         Initialize the Wompi client.
         
         Args:
-            public_key (str): The public key of the merchant.
-            integrity_key (str): The integrity secret key for signature generation.
+            public_key (str): The public key of the merchant (pub_*).
+            private_key (str): The private key for API authentication (prv_*).
+            integrity_key (str): The integrity secret key for signature generation (*_integrity_*).
             environment (str, optional): Either "production" or "sandbox". Defaults to "production".
             session (aiohttp.ClientSession, optional): An existing aiohttp session to use. If None, a new session will be created when needed.
         """
         self.public_key = public_key
+        self.private_key = private_key
         self.integrity_key = integrity_key
         self.environment = environment
         self.base_url = "https://checkout.wompi.co/p/"
@@ -205,9 +207,13 @@ class WompiAsync:
             list: A list of transaction data matching the reference.
         """
         url = f"{self.api_url}/transactions?reference={reference}"
+        headers = {
+            "Authorization": f"Bearer {self.private_key}",
+            "Accept": "application/json"
+        }
         
         session = await self._get_session()
-        async with session.get(url) as response:
+        async with session.get(url, headers=headers) as response:
             if response.status == 200:
                 data = await response.json()
                 return data.get("data", [])

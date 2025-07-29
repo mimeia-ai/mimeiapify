@@ -272,7 +272,9 @@ class UserThreads:
         """
         loop = GlobalSymphony.get().loop
         future = asyncio.run_coroutine_threadsafe(self.load_threads(), loop)
-        return future.result()
+        result = future.result()
+        logger.debug("Sync loaded threads for %s/%s: %s", self.tenant, self.user_id, result)
+        return result
 
     def sync_save_threads(self, threads: Dict[str, Any]) -> None:
         """
@@ -292,7 +294,8 @@ class UserThreads:
         """
         loop = GlobalSymphony.get().loop
         future = asyncio.run_coroutine_threadsafe(self.save_threads(threads), loop)
-        future.result()
+        result = future.result()
+        logger.debug("Sync saved threads for %s/%s: %s", self.tenant, self.user_id, result)
 
     def sync_delete_threads(self) -> None:
         """
@@ -304,7 +307,8 @@ class UserThreads:
         """
         loop = GlobalSymphony.get().loop
         future = asyncio.run_coroutine_threadsafe(self.delete_threads(), loop)
-        future.result()
+        result = future.result()
+        logger.debug("Sync deleted threads for %s/%s: %s", self.tenant, self.user_id, result)
 
     # ------------------------------------------------------------------ #
     # Utility methods
